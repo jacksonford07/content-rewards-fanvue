@@ -1,0 +1,8 @@
+// Drizzle schema entry point. Define your tables here.
+// Example:
+// import { pgTable, serial, text } from "drizzle-orm/pg-core";
+// export const users = pgTable("users", {
+//   id: serial("id").primaryKey(),
+//   email: text("email").notNull().unique(),
+// });
+export {};
