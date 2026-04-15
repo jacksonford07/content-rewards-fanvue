@@ -129,7 +129,7 @@ export function CreatorAnalyticsPage() {
             </Badge>
           </CardHeader>
           <CardContent>
-            <ChartSvg values={viewsSeries} color="oklch(0.8 0.17 78)" />
+            <ChartSvg values={viewsSeries} color="oklch(0.72 0.20 293)" />
           </CardContent>
         </Card>
 

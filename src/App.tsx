@@ -15,6 +15,7 @@ import { CreatorAnalyticsPage } from "@/pages/creator-analytics-page"
 import { NotificationsPage } from "@/pages/notifications-page"
 import { CampaignBudgetPage } from "@/pages/campaign-budget-page"
 import { KycPage } from "@/pages/kyc-page"
+import { RoleSelectPage } from "@/pages/role-select-page"
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="login" element={<LoginPage />} />
+          <Route path="select-role" element={<RoleSelectPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<HubPage />} />
             <Route path="campaigns/:id" element={<CampaignDetailPage />} />

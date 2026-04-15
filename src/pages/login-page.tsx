@@ -29,7 +29,7 @@ export function LoginPage() {
       toast.success("Welcome back!", {
         description: "Signed in via Fanvue successfully.",
       })
-      navigate("/")
+      navigate("/select-role")
     }, 1500)
   }
 
