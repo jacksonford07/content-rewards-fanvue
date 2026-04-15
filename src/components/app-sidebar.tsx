@@ -14,6 +14,7 @@ import {
   CaretUpDown,
   User,
   Gear,
+  ArrowsClockwise,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -44,6 +45,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSidebarHover } from "@/components/app-layout"
 import { currentUser } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
+
+type UserRole = "clipper" | "creator"
 
 const clipperNav = [
   { to: "/", label: "Campaigns hub", icon: House, end: true },
@@ -78,6 +81,21 @@ export function AppSidebar() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null)
   const portalRef = useCallback((node: HTMLDivElement | null) => setPortalContainer(node), [])
+
+  const [role, setRole] = useState<UserRole>(() => {
+    return (localStorage.getItem("cr_role") as UserRole) || "clipper"
+  })
+
+  const switchRole = () => {
+    const newRole: UserRole = role === "clipper" ? "creator" : "clipper"
+    setRole(newRole)
+    localStorage.setItem("cr_role", newRole)
+    toast.success(`Switched to ${newRole === "clipper" ? "Clipper" : "Creator"} mode`)
+    navigate(newRole === "clipper" ? "/" : "/creator/campaigns")
+  }
+
+  const mainNav = role === "clipper" ? clipperNav : creatorNav
+  const roleLabel = role === "clipper" ? "Clipper" : "Creator"
 
   const handleDropdownChange = (isOpen: boolean) => {
     setDropdownOpen(isOpen)
@@ -115,12 +133,13 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Clipper</SidebarGroupLabel>
+          <SidebarGroupLabel>{roleLabel}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {clipperNav.map((item) => {
+              {mainNav.map((item) => {
                 const Icon = item.icon
-                const active = item.end
+                const end = "end" in item ? (item.end as boolean) : undefined
+                const active = end
                   ? location.pathname === item.to
                   : location.pathname.startsWith(item.to)
                 return (
@@ -130,38 +149,7 @@ export function AppSidebar() {
                       isActive={active}
                       tooltip={item.label}
                     >
-                      <NavLink to={item.to} end={item.end}>
-                        <Icon className="size-5" weight={active ? "fill" : "regular"} />
-                        <span>{item.label}</span>
-                      </NavLink>
-                    </SidebarMenuButton>
-                    {item.badge && (
-                      <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>
-                    )}
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Creator</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {creatorNav.map((item) => {
-                const Icon = item.icon
-                const active = location.pathname.startsWith(item.to)
-                return (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={active}
-                      tooltip={item.label}
-                    >
-                      <NavLink to={item.to}>
+                      <NavLink to={item.to} end={end}>
                         <Icon className="size-5" weight={active ? "fill" : "regular"} />
                         <span>{item.label}</span>
                       </NavLink>
@@ -181,6 +169,12 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={switchRole} tooltip={`Switch to ${role === "clipper" ? "Creator" : "Clipper"}`}>
+                  <ArrowsClockwise className="size-5" />
+                  <span>Switch to {role === "clipper" ? "Creator" : "Clipper"}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               {bottomNav.map((item) => {
                 const Icon = item.icon
                 const active = location.pathname.startsWith(item.to)
@@ -259,6 +253,10 @@ export function AppSidebar() {
             <DropdownMenuItem>
               <Gear className="size-4" />
               Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={switchRole}>
+              <ArrowsClockwise className="size-4" />
+              Switch to {role === "clipper" ? "Creator" : "Clipper"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
