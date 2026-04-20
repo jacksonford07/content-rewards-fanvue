@@ -1,0 +1,244 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import api from "@/lib/api"
+import { QK } from "@/lib/query-keys"
+import type {
+  PaginatedResponse,
+  TMutationOptions,
+  TQueryOptions,
+} from "@/lib/query-types"
+import type { Campaign } from "@/lib/types"
+
+export interface ListCampaignsParams {
+  search?: string
+  platforms?: string[]
+  minRate?: string
+  hasBudget?: boolean
+  sort?: string
+  page: number
+  limit: number
+}
+
+export function useCampaigns(
+  params: ListCampaignsParams,
+  options?: TQueryOptions<PaginatedResponse<Campaign>>,
+) {
+  return useQuery({
+    queryKey: [QK.campaigns.list, params] as const,
+    queryFn: async () => {
+      const qs = new URLSearchParams()
+      if (params.search) qs.set("search", params.search)
+      if (params.platforms?.length) qs.set("platforms", params.platforms.join(","))
+      if (params.minRate && params.minRate !== "any") qs.set("min_rate", params.minRate)
+      if (params.sort) qs.set("sort", params.sort)
+      if (params.hasBudget) qs.set("has_budget", "true")
+      qs.set("page", String(params.page))
+      qs.set("limit", String(params.limit))
+      const res = await api.get<PaginatedResponse<Campaign>>(
+        `/campaigns?${qs.toString()}`,
+      )
+      return res.data
+    },
+    ...options,
+  })
+}
+
+export interface MyCampaignsParams {
+  search?: string
+  status?: string[]
+  sort?: string
+  page: number
+  limit: number
+}
+
+export function useMyCampaigns(
+  params: MyCampaignsParams,
+  options?: TQueryOptions<PaginatedResponse<Campaign>>,
+) {
+  return useQuery({
+    queryKey: [QK.campaigns.mine, params] as const,
+    queryFn: async () => {
+      const qs = new URLSearchParams()
+      if (params.search) qs.set("search", params.search)
+      if (params.status?.length) qs.set("status", params.status.join(","))
+      if (params.sort) qs.set("sort", params.sort)
+      qs.set("page", String(params.page))
+      qs.set("limit", String(params.limit))
+      const res = await api.get<PaginatedResponse<Campaign>>(
+        `/campaigns/mine?${qs.toString()}`,
+      )
+      return res.data
+    },
+    ...options,
+  })
+}
+
+export interface MyCampaignsStats {
+  activeCampaigns: number
+  totalClippers: number
+  totalViews: number
+  totalSpend: number
+}
+
+export function useMyCampaignsStats(options?: TQueryOptions<MyCampaignsStats>) {
+  return useQuery({
+    queryKey: [QK.campaigns.mineStats] as const,
+    queryFn: async () => {
+      const res = await api.get<MyCampaignsStats>("/campaigns/mine/stats")
+      return res.data
+    },
+    ...options,
+  })
+}
+
+export function useCampaign(id: string | undefined, options?: TQueryOptions<Campaign>) {
+  return useQuery({
+    queryKey: [QK.campaigns.byId, id] as const,
+    queryFn: async () => {
+      const res = await api.get<Campaign>(`/campaigns/${id}`)
+      return res.data
+    },
+    enabled: !!id,
+    ...options,
+  })
+}
+
+interface CampaignTransaction {
+  id: string
+  type: string
+  description: string
+  amount: number
+  at: string
+  status: string
+}
+
+export function useCampaignTransactions(
+  id: string | undefined,
+  options?: TQueryOptions<CampaignTransaction[]>,
+) {
+  return useQuery({
+    queryKey: [QK.campaigns.transactions, id] as const,
+    queryFn: async () => {
+      const res = await api.get<CampaignTransaction[]>(`/campaigns/${id}/transactions`)
+      return res.data
+    },
+    enabled: !!id,
+    ...options,
+  })
+}
+
+// ─── Mutations ────────────────────────────────────────────────────────────
+
+async function invalidateCampaignFamily(qc: ReturnType<typeof useQueryClient>) {
+  // refetchType: "all" forces inactive queries to refetch too — needed so the
+  // destination page (e.g. /creator/campaigns) has fresh data in cache by the
+  // time the user lands there. Otherwise they briefly see the stale list.
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: [QK.campaigns.list], refetchType: "all" }),
+    qc.invalidateQueries({ queryKey: [QK.campaigns.mine], refetchType: "all" }),
+    qc.invalidateQueries({
+      queryKey: [QK.campaigns.mineStats],
+      refetchType: "all",
+    }),
+    qc.invalidateQueries({
+      queryKey: [QK.analytics.dashboard],
+      refetchType: "all",
+    }),
+    qc.invalidateQueries({
+      queryKey: [QK.analytics.campaigns],
+      refetchType: "all",
+    }),
+    qc.invalidateQueries({ queryKey: [QK.campaigns.byId] }),
+  ])
+}
+
+type CreateCampaignBody = Record<string, unknown>
+
+export function useCreateCampaign(
+  options?: TMutationOptions<{ id: string }, CreateCampaignBody>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body) => {
+      const res = await api.post<{ id: string }>("/campaigns", body)
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function useUpdateCampaign(
+  options?: TMutationOptions<unknown, { id: string; body: Record<string, unknown> }>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, body }) => {
+      const res = await api.put(`/campaigns/${id}`, body)
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function useFundCampaign(
+  options?: TMutationOptions<unknown, { id: string; amount: number }>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, amount }) => {
+      const res = await api.post(`/campaigns/${id}/fund`, { amount })
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await Promise.all([
+        invalidateCampaignFamily(qc),
+        qc.invalidateQueries({ queryKey: [QK.wallet.balance], refetchType: "all" }),
+        qc.invalidateQueries({ queryKey: [QK.wallet.transactions], refetchType: "all" }),
+        qc.invalidateQueries({ queryKey: [QK.auth.me], refetchType: "all" }),
+        qc.invalidateQueries({ queryKey: [QK.campaigns.transactions] }),
+      ])
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function usePauseCampaign(
+  options?: TMutationOptions<{ status: string }, string>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.post<{ status: string }>(`/campaigns/${id}/pause`)
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function useDeleteCampaign(options?: TMutationOptions<unknown, string>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.delete(`/campaigns/${id}`)
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}

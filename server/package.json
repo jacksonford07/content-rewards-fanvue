@@ -16,7 +16,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "seed": "npx tsx src/db/seed.ts",
+    "db:push": "npx drizzle-kit push"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

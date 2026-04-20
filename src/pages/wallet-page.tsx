@@ -7,11 +7,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Bank,
-  ShieldCheck,
   CheckCircle,
   Clock,
   Coins,
-  WarningCircle,
+  CaretRight,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -29,80 +28,44 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert"
 import { PageHeader } from "@/components/page-header"
+import { PaginationBar } from "@/components/pagination-bar"
+import { Skeleton } from "@/components/ui/skeleton"
 import { formatCurrency } from "@/lib/mock-data"
-
-interface Transaction {
-  id: string
-  type: "payout" | "withdraw" | "topup" | "escrow"
-  description: string
-  campaign?: string
-  amount: number
-  at: string
-  status: "completed" | "pending"
-}
-
-const transactions: Transaction[] = [
-  {
-    id: "tx_001",
-    type: "payout",
-    description: "Payout — Fitness Transformation Series",
-    campaign: "Luna Parker",
-    amount: 419.1,
-    at: "Apr 6, 2026 · 8:10 PM",
-    status: "completed",
-  },
-  {
-    id: "tx_002",
-    type: "escrow",
-    description: "Campaign escrow — My Fitness Campaign",
-    amount: -5000,
-    at: "Mar 25, 2026 · 10:00 AM",
-    status: "completed",
-  },
-  {
-    id: "tx_003",
-    type: "topup",
-    description: "Wallet top-up via Apple Pay",
-    amount: 2000,
-    at: "Mar 23, 2026 · 2:34 PM",
-    status: "completed",
-  },
-  {
-    id: "tx_004",
-    type: "withdraw",
-    description: "Withdrawal to bank · ••• 4523",
-    amount: -250,
-    at: "Mar 18, 2026 · 9:15 AM",
-    status: "completed",
-  },
-  {
-    id: "tx_005",
-    type: "payout",
-    description: "Payout — Podcast Highlights Reel (pending)",
-    amount: 128.5,
-    at: "Apr 9, 2026 · 11:30 AM",
-    status: "pending",
-  },
-]
+import { useAuth } from "@/hooks/use-auth"
+import {
+  useWallet,
+  useWalletTransactions,
+  useTopup,
+  useWithdraw,
+} from "@/queries/wallet"
 
 type WithdrawStep = "amount" | "review" | "success"
 
 export function WalletPage() {
+  const { user, refresh } = useAuth()
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [topupOpen, setTopupOpen] = useState(false)
   const [amount, setAmount] = useState("")
   const [withdrawStep, setWithdrawStep] = useState<WithdrawStep>("amount")
   const [txId, setTxId] = useState("")
+  const [page, setPage] = useState(1)
+  const limit = 10
 
-  const balance = 1248.65
-  const pendingPayouts = 541.6
-  const kycCompleted = false
+  const { data: walletData, isLoading: walletLoading } = useWallet()
+  const { data: txResp, isLoading: txLoading } = useWalletTransactions({
+    page,
+    limit,
+  })
+  const loading = walletLoading || txLoading
+  const transactions = txResp?.data ?? []
+  const meta = txResp?.meta
+  const pendingPayouts = walletData?.pendingPayouts ?? 0
+
+  const topupMutation = useTopup()
+  const withdrawMutation = useWithdraw()
+
+  const balance = user?.walletBalance ?? 0
 
   const withdrawAmount = parseFloat(amount) || 0
   const canWithdraw = withdrawAmount >= 20 && withdrawAmount <= balance
@@ -114,13 +77,18 @@ export function WalletPage() {
     setWithdrawOpen(true)
   }
 
-  const handleWithdrawConfirm = () => {
-    const id = `WD-${Date.now().toString(36).toUpperCase()}`
-    setTxId(id)
-    setWithdrawStep("success")
-    toast.success("Withdrawal requested", {
-      description: `${formatCurrency(withdrawAmount)} will arrive in 1-3 business days.`,
-    })
+  const handleWithdrawConfirm = async () => {
+    try {
+      const res = await withdrawMutation.mutateAsync(withdrawAmount)
+      setTxId(res.transactionId ?? `WD-${Date.now().toString(36).toUpperCase()}`)
+      setWithdrawStep("success")
+      toast.success("Withdrawal requested", {
+        description: `${formatCurrency(withdrawAmount)} will arrive in 1-3 business days.`,
+      })
+      await refresh()
+    } catch {
+      toast.error("Withdrawal failed")
+    }
   }
 
   const closeWithdraw = () => {
@@ -132,72 +100,61 @@ export function WalletPage() {
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6 md:py-8">
       <PageHeader
-        title="Wallet & earnings"
-        description="Manage your balance, fund campaigns, and withdraw to your bank."
+        title={user?.role === "creator" ? "Wallet" : "Wallet & earnings"}
+        description={user?.role === "creator" ? "Manage your balance and fund campaigns." : "Manage your balance, fund campaigns, and withdraw to your bank."}
         className="mb-6"
       />
 
       {/* Balance card */}
-      <Card className="mb-6 overflow-hidden border-primary/30 bg-gradient-to-br from-primary/15 via-card to-card backdrop-blur">
-        <CardContent className="p-6 md:p-8">
-          <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-primary">
-                <Wallet className="size-4" weight="fill" />
-                <span className="text-xs font-medium uppercase tracking-wide">
-                  Available balance
-                </span>
+      {loading ? (
+        <Card className="mb-6 border-primary/30 bg-card/70">
+          <CardContent className="p-6 md:p-8 space-y-4">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-12 w-48" />
+            <Skeleton className="h-3 w-36" />
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="mb-6 overflow-hidden border-primary/30 bg-gradient-to-br from-primary/15 via-card to-card backdrop-blur">
+          <CardContent className="p-6 md:p-8">
+            <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-primary">
+                  <Wallet className="size-4" weight="fill" />
+                  <span className="text-xs font-medium uppercase tracking-wide">
+                    Available balance
+                  </span>
+                </div>
+                <p className="mt-2 text-4xl font-bold tracking-tight tabular-nums sm:text-5xl">
+                  {formatCurrency(balance)}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Pending payouts:{" "}
+                  <span className="font-medium text-foreground">
+                    {formatCurrency(pendingPayouts)}
+                  </span>
+                </p>
               </div>
-              <p className="mt-2 text-4xl font-bold tracking-tight tabular-nums sm:text-5xl">
-                {formatCurrency(balance)}
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Pending payouts:{" "}
-                <span className="font-medium text-foreground">
-                  {formatCurrency(pendingPayouts)}
-                </span>
-              </p>
+              <div className="flex flex-wrap gap-2">
+                {user?.role === "creator" && (
+                  <Button onClick={() => setTopupOpen(true)}>
+                    <ArrowCircleUp className="size-4" weight="fill" />
+                    Top up
+                  </Button>
+                )}
+                <Button
+                  variant={user?.role === "creator" ? "outline" : "default"}
+                  onClick={openWithdraw}
+                >
+                  <ArrowCircleDown className="size-4" weight="fill" />
+                  Withdraw
+                </Button>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setTopupOpen(true)}>
-                <ArrowCircleUp className="size-4" weight="fill" />
-                Top up
-              </Button>
-              <Button variant="outline" onClick={openWithdraw}>
-                <ArrowCircleDown className="size-4" weight="fill" />
-                Withdraw
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* KYC + bank */}
-      {!kycCompleted && (
-        <Alert className="mb-6 border-warning/40 bg-warning/5">
-          <WarningCircle className="size-4 text-warning" weight="fill" />
-          <AlertTitle>Complete KYC to withdraw</AlertTitle>
-          <AlertDescription>
-            Verify your identity and link a bank account before your first
-            withdrawal. Minimum withdrawal amount is $20. Earnings continue to
-            accumulate until you're ready.
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" asChild>
-                <Link to="/kyc">
-                  <ShieldCheck className="size-4" weight="fill" />
-                  Start KYC
-                </Link>
-              </Button>
-              <Button size="sm" variant="outline" asChild>
-                <Link to="/kyc">
-                  <Bank className="size-4" />
-                  Link bank
-                </Link>
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
+          </CardContent>
+        </Card>
       )}
+
 
       {/* Transactions */}
       <Card className="border-border/60 bg-card/70 backdrop-blur">
@@ -209,58 +166,112 @@ export function WalletPage() {
         </CardHeader>
         <CardContent className="px-3 pb-3 md:px-4 md:pb-4">
           <div className="divide-y divide-border/50">
-            {transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center gap-3 py-3 md:gap-4"
-              >
-                <div
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-full border ${
-                    tx.amount >= 0
-                      ? "border-success/30 bg-success/10 text-success"
-                      : "border-border bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {tx.amount >= 0 ? (
-                    <ArrowCircleDown className="size-4" weight="fill" />
-                  ) : (
-                    <ArrowCircleUp className="size-4" weight="fill" />
-                  )}
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 py-3">
+                  <Skeleton className="size-9 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                  <Skeleton className="h-4 w-16" />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {tx.description}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{tx.at}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span
-                    className={`text-sm font-semibold tabular-nums ${
-                      tx.amount >= 0 ? "text-success" : "text-foreground"
-                    }`}
+              ))
+            ) : transactions.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No transactions yet. Your earnings will appear here.
+              </p>
+            ) : (
+              transactions.map((tx) => {
+                const inner = (
+                  <>
+                    <div
+                      className={`flex size-9 shrink-0 items-center justify-center rounded-full border ${
+                        tx.amount >= 0
+                          ? "border-success/30 bg-success/10 text-success"
+                          : "border-border bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {tx.amount >= 0 ? (
+                        <ArrowCircleDown className="size-4" weight="fill" />
+                      ) : (
+                        <ArrowCircleUp className="size-4" weight="fill" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {tx.description}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(tx.at).toLocaleString(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={`text-sm font-semibold tabular-nums ${
+                          tx.amount >= 0 ? "text-success" : "text-foreground"
+                        }`}
+                      >
+                        {tx.amount >= 0 ? "+" : ""}
+                        {formatCurrency(tx.amount)}
+                      </span>
+                      {tx.status === "pending" ? (
+                        <Badge
+                          variant="outline"
+                          className="h-5 border-warning/40 bg-warning/10 px-1.5 text-[10px] text-warning"
+                        >
+                          <Clock className="size-2.5" /> Pending
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="h-5 border-border/70 px-1.5 text-[10px] text-muted-foreground"
+                        >
+                          <CheckCircle className="size-2.5" /> Completed
+                        </Badge>
+                      )}
+                    </div>
+                    {tx.campaignId ? (
+                      <CaretRight
+                        weight="bold"
+                        className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                      />
+                    ) : (
+                      <span aria-hidden className="size-4 shrink-0" />
+                    )}
+                  </>
+                )
+                return tx.campaignId ? (
+                  <Link
+                    key={tx.id}
+                    to={`/campaigns/${tx.campaignId}`}
+                    className="group -mx-2 flex items-center gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/40 md:gap-4"
                   >
-                    {tx.amount >= 0 ? "+" : ""}
-                    {formatCurrency(tx.amount)}
-                  </span>
-                  {tx.status === "pending" ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-warning/40 bg-warning/10 px-1.5 text-[10px] text-warning"
-                    >
-                      <Clock className="size-2.5" /> Pending
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-border/70 px-1.5 text-[10px] text-muted-foreground"
-                    >
-                      <CheckCircle className="size-2.5" /> Completed
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            ))}
+                    {inner}
+                  </Link>
+                ) : (
+                  <div
+                    key={tx.id}
+                    className="flex items-center gap-3 py-3 md:gap-4"
+                  >
+                    {inner}
+                  </div>
+                )
+              })
+            )}
           </div>
+          {meta && (
+            <PaginationBar
+              page={meta.page}
+              limit={meta.limit}
+              totalItems={meta.totalItems}
+              totalPages={meta.totalPages}
+              onPageChange={setPage}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -268,7 +279,7 @@ export function WalletPage() {
       <Dialog
         open={withdrawOpen}
         onOpenChange={(open) => {
-          if (!open) closeWithdraw()
+          if (!open && !withdrawMutation.isPending) closeWithdraw()
         }}
       >
         <DialogContent>
@@ -352,7 +363,10 @@ export function WalletPage() {
                   <ArrowLeft className="size-4" />
                   Back
                 </Button>
-                <Button onClick={handleWithdrawConfirm}>
+                <Button
+                  onClick={handleWithdrawConfirm}
+                  loading={withdrawMutation.isPending}
+                >
                   Confirm withdrawal
                 </Button>
               </DialogFooter>
@@ -389,7 +403,12 @@ export function WalletPage() {
       </Dialog>
 
       {/* Topup dialog */}
-      <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
+      <Dialog
+        open={topupOpen}
+        onOpenChange={(open) => {
+          if (!topupMutation.isPending) setTopupOpen(open)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Top up wallet</DialogTitle>
@@ -421,18 +440,29 @@ export function WalletPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setTopupOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={topupMutation.isPending}
+              onClick={() => setTopupOpen(false)}
+            >
               Cancel
             </Button>
             <Button
-              onClick={() => {
-                toast.success("Wallet topped up", {
-                  description: `${formatCurrency(parseFloat(amount) || 0)} added to your balance.`,
-                })
-                setTopupOpen(false)
-                setAmount("")
+              onClick={async () => {
+                try {
+                  await topupMutation.mutateAsync(parseFloat(amount) || 0)
+                  toast.success("Wallet topped up", {
+                    description: `${formatCurrency(parseFloat(amount) || 0)} added to your balance.`,
+                  })
+                  await refresh()
+                  setTopupOpen(false)
+                  setAmount("")
+                } catch {
+                  toast.error("Top-up failed")
+                }
               }}
               disabled={!amount || parseFloat(amount) <= 0}
+              loading={topupMutation.isPending}
             >
               Confirm payment
             </Button>

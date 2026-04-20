@@ -13,9 +13,6 @@ export type SubmissionStatus =
   | "rejected"
   | "auto_approved"
   | "paid"
-  | "flagged"
-
-export type AiReviewResult = "clean" | "flagged"
 
 export type RequirementsType = "native" | "google_doc"
 
@@ -67,14 +64,16 @@ export interface Submission {
   thumbnailUrl: string
   platform: Platform
   submittedAt: string
-  aiReviewResult: AiReviewResult
-  aiNotes?: string
   status: SubmissionStatus
-  viewsCurrent: number
   viewsAtDay30?: number
   payoutAmount?: number
+  rewardRatePer1k: number
+  maxPayoutPerClip?: number
+  minPayoutThreshold: number
+  campaignBudgetRemaining?: number
   creatorDecisionAt?: string
   rejectionReason?: string
+  isBanned?: boolean
   verificationStartedAt?: string
   autoApproveAt?: string
   lockDate?: string

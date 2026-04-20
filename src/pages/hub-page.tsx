@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { MagnifyingGlass, SlidersHorizontal } from "@phosphor-icons/react"
 
 import {
@@ -19,11 +19,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { PageHeader } from "@/components/page-header"
 import { CampaignCard } from "@/components/campaign-card"
-import { campaigns } from "@/lib/mock-data"
+import { PaginationBar } from "@/components/pagination-bar"
+import { useCampaigns } from "@/queries/campaigns"
 import type { Platform } from "@/lib/types"
 
 type SortKey = "newest" | "highest_rate" | "most_popular"
@@ -40,7 +42,35 @@ export function HubPage() {
   const [sort, setSort] = useState<SortKey>("newest")
   const [minRate, setMinRate] = useState("any")
   const [search, setSearch] = useState("")
-  const [hasBudget, setHasBudget] = useState(false)
+
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const handleSearch = useCallback((value: string) => {
+    setSearch(value)
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(value.trim()), 300)
+  }, [])
+
+  const [page, setPage] = useState(1)
+  const limit = 20
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, selectedPlatforms, minRate, sort])
+
+  const { data: resp, isLoading: loading } = useCampaigns({
+    search: debouncedSearch || undefined,
+    platforms: selectedPlatforms.length > 0 ? selectedPlatforms : undefined,
+    minRate,
+    hasBudget: true,
+    sort: sort === "newest" ? undefined : sort,
+    page,
+    limit,
+  })
+  const campaigns = resp?.data ?? []
+  const meta = resp?.meta
 
   // Sheet open state
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -49,13 +79,11 @@ export function HubPage() {
   const [draftPlatforms, setDraftPlatforms] = useState<Platform[]>([])
   const [draftSort, setDraftSort] = useState<SortKey>("newest")
   const [draftMinRate, setDraftMinRate] = useState("any")
-  const [draftHasBudget, setDraftHasBudget] = useState(false)
 
   const openSheet = () => {
     setDraftPlatforms([...selectedPlatforms])
     setDraftSort(sort)
     setDraftMinRate(minRate)
-    setDraftHasBudget(hasBudget)
     setSheetOpen(true)
   }
 
@@ -63,7 +91,6 @@ export function HubPage() {
     setSelectedPlatforms(draftPlatforms)
     setSort(draftSort)
     setMinRate(draftMinRate)
-    setHasBudget(draftHasBudget)
     setSheetOpen(false)
   }
 
@@ -71,7 +98,6 @@ export function HubPage() {
     setDraftPlatforms([])
     setDraftSort("newest")
     setDraftMinRate("any")
-    setDraftHasBudget(false)
   }
 
   const toggleDraftPlatform = (p: Platform) => {
@@ -83,38 +109,9 @@ export function HubPage() {
   const activeFilterCount =
     (selectedPlatforms.length > 0 ? 1 : 0) +
     (minRate !== "any" ? 1 : 0) +
-    (hasBudget ? 1 : 0) +
     (sort !== "newest" ? 1 : 0)
 
-  const filtered = useMemo(() => {
-    let list = campaigns.filter((c) => c.status === "active")
-    if (selectedPlatforms.length > 0)
-      list = list.filter((c) =>
-        selectedPlatforms.some((p) => c.allowedPlatforms.includes(p))
-      )
-    if (minRate !== "any") {
-      const min = parseFloat(minRate)
-      list = list.filter((c) => c.rewardRatePer1k >= min)
-    }
-    if (hasBudget)
-      list = list.filter((c) => c.totalBudget - c.budgetSpent > 0)
-    if (search.trim())
-      list = list.filter(
-        (c) =>
-          c.title.toLowerCase().includes(search.toLowerCase()) ||
-          c.creator.name.toLowerCase().includes(search.toLowerCase())
-      )
-    if (sort === "highest_rate")
-      list = [...list].sort((a, b) => b.rewardRatePer1k - a.rewardRatePer1k)
-    else if (sort === "most_popular")
-      list = [...list].sort((a, b) => b.totalViews - a.totalViews)
-    else
-      list = [...list].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
-    return list
-  }, [selectedPlatforms, minRate, sort, search, hasBudget])
+  const filtered = campaigns
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8">
@@ -131,7 +128,7 @@ export function HubPage() {
           <Input
             placeholder="Search campaigns or creators…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
             className="pl-9"
           />
         </div>
@@ -202,16 +199,6 @@ export function HubPage() {
                   </Select>
                 </div>
 
-                <hr className="border-border/60" />
-
-                {/* Budget available */}
-                <label className="flex cursor-pointer items-center gap-3">
-                  <Checkbox
-                    checked={draftHasBudget}
-                    onCheckedChange={(v) => setDraftHasBudget(Boolean(v))}
-                  />
-                  <span className="text-sm font-medium">Budget available only</span>
-                </label>
               </div>
             </div>
 
@@ -239,8 +226,24 @@ export function HubPage() {
         </Sheet>
       </div>
 
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="overflow-hidden border-border/60 bg-card/70">
+              <Skeleton className="aspect-video w-full" />
+              <div className="p-4 space-y-3">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {!loading && (filtered.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-3 p-12 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-muted">
             <MagnifyingGlass className="size-5 text-muted-foreground" />
@@ -256,7 +259,6 @@ export function HubPage() {
               setSelectedPlatforms([])
               setMinRate("any")
               setSearch("")
-              setHasBudget(false)
               setSort("newest")
             }}
           >
@@ -264,12 +266,23 @@ export function HubPage() {
           </Button>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((c) => (
-            <CampaignCard key={c.id} campaign={c} />
-          ))}
-        </div>
-      )}
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((c) => (
+              <CampaignCard key={c.id} campaign={c} />
+            ))}
+          </div>
+          {meta && (
+            <PaginationBar
+              page={meta.page}
+              limit={meta.limit}
+              totalItems={meta.totalItems}
+              totalPages={meta.totalPages}
+              onPageChange={setPage}
+            />
+          )}
+        </>
+      ))}
     </div>
   )
 }

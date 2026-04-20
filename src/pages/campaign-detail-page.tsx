@@ -1,5 +1,6 @@
-import { Link, useParams, useNavigate } from "react-router-dom"
+import { Link, useParams } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
   ArrowSquareOut,
@@ -13,6 +14,10 @@ import {
   Info,
   PlayCircle,
   Lightning,
+  Clock,
+  XCircle,
+  ListChecks,
+  Prohibit,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -53,28 +58,41 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PlatformIcon } from "@/components/platform-icon"
 import {
-  campaigns,
   formatCompactNumber,
   formatCurrency,
   platformLabels,
+  timeAgo,
+  timeUntil,
 } from "@/lib/mock-data"
+import { useCampaign } from "@/queries/campaigns"
+import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
+import { QK } from "@/lib/query-keys"
+import { NotFoundCard } from "@/components/not-found-card"
 import type { Platform } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 export function CampaignDetailPage() {
   const { id } = useParams()
-  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [submitOpen, setSubmitOpen] = useState(false)
   const [postUrl, setPostUrl] = useState("")
   const [platform, setPlatform] = useState<Platform | "">("")
   const [acked, setAcked] = useState(false)
 
-  const campaign = campaigns.find((c) => c.id === id) ?? campaigns[0]
-  const budgetRemaining = campaign.totalBudget - campaign.budgetSpent
-  const budgetPct = Math.round(
-    (campaign.budgetSpent / campaign.totalBudget) * 100
-  )
+  const { data: campaign, isError: campaignError } = useCampaign(id)
+  const { data: myResp } = useMySubmissions({
+    tab: "all",
+    page: 1,
+    limit: 100,
+    campaignId: id,
+  })
+  const myClips = myResp?.data ?? []
+
+  const submitMutation = useSubmitClip()
+  const submitting = submitMutation.isPending
 
   // Auto-detect platform from URL
   const detectedPlatform: Platform | null = useMemo(() => {
@@ -88,10 +106,10 @@ export function CampaignDetailPage() {
 
   // Auto-select platform when detected
   useEffect(() => {
-    if (detectedPlatform && campaign.allowedPlatforms.includes(detectedPlatform)) {
+    if (detectedPlatform && campaign?.allowedPlatforms.includes(detectedPlatform)) {
       setPlatform(detectedPlatform)
     }
-  }, [detectedPlatform, campaign.allowedPlatforms])
+  }, [detectedPlatform, campaign?.allowedPlatforms])
 
   // URL validation: must be a valid URL and match allowed platforms
   const urlError: string | null = useMemo(() => {
@@ -102,23 +120,125 @@ export function CampaignDetailPage() {
       return "Paste a valid URL"
     }
     if (!detectedPlatform) return "URL must be from TikTok, Instagram, or YouTube"
-    if (!campaign.allowedPlatforms.includes(detectedPlatform))
+    if (campaign && !campaign.allowedPlatforms.includes(detectedPlatform))
       return `${platformLabels[detectedPlatform]} isn't allowed for this campaign`
+    if (platform && detectedPlatform && platform !== detectedPlatform)
+      return `URL is from ${platformLabels[detectedPlatform]}, but you selected ${platformLabels[platform as Platform]}`
     return null
-  }, [postUrl, detectedPlatform, campaign.allowedPlatforms])
+  }, [postUrl, detectedPlatform, campaign, platform])
 
   const formValid = postUrl.trim() && platform && acked && !urlError
 
-  const handleSubmit = () => {
-    setSubmitOpen(false)
-    setPostUrl("")
-    setPlatform("")
-    setAcked(false)
-    toast.success("Submission received", {
-      description:
-        "We're running AI pre-screening now. You'll hear back within 48 hours.",
-    })
-    navigate("/submissions")
+  // Extract Google Drive file ID from URL
+  const driveFileId = useMemo(() => {
+    const url = campaign?.sourceContentUrl ?? ""
+    const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/)
+    return match?.[1] ?? null
+  }, [campaign?.sourceContentUrl])
+
+  if (campaignError) {
+    return (
+      <NotFoundCard
+        title="Campaign not found"
+        description="This campaign may have been removed, paused by the creator, or the link is outdated."
+        backTo="/"
+        backLabel="Back to hub"
+      />
+    )
+  }
+
+  if (!campaign) return (
+    <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6 md:py-8">
+      <Skeleton className="h-4 w-48 mb-6" />
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border/60 bg-card/70 p-4 space-y-2">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-2/3" />
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="aspect-video w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  const budgetRemaining = campaign.totalBudget - campaign.budgetSpent
+  const isBannedFromCampaign = myClips.some((c) => c.isBanned)
+  const banReason = myClips.find((c) => c.isBanned)?.rejectionReason
+  const canSubmit = campaign.status === "active" && budgetRemaining > 0 && !isBannedFromCampaign
+  const budgetPct = Math.round(
+    (campaign.budgetSpent / campaign.totalBudget) * 100
+  )
+
+  const payoutTiers = (() => {
+    const rate = campaign.rewardRatePer1k
+    if (rate <= 0) return [] as { views: number; payout: number; isMax?: boolean }[]
+    const maxSinglePayout = Math.max(
+      0,
+      campaign.maxPayoutPerClip
+        ? Math.min(campaign.maxPayoutPerClip, budgetRemaining)
+        : budgetRemaining
+    )
+    const maxViewsRaw = (maxSinglePayout / rate) * 1000
+    if (maxViewsRaw < 1000) return []
+    const roundStep = maxViewsRaw >= 100_000 ? 5000 : maxViewsRaw >= 10_000 ? 1000 : 500
+    const roundDown = (v: number) => Math.max(roundStep, Math.floor(v / roundStep) * roundStep)
+    const tier1Views = roundDown(maxViewsRaw * 0.25)
+    const tier2Views = roundDown(maxViewsRaw * 0.5)
+    const smaller = Array.from(new Set([tier1Views, tier2Views]))
+      .filter((v) => v < maxViewsRaw)
+      .sort((a, b) => a - b)
+      .map((views) => ({ views, payout: (views / 1000) * rate, isMax: false }))
+    return [
+      ...smaller,
+      { views: Math.round(maxViewsRaw), payout: maxSinglePayout, isMax: true },
+    ]
+  })()
+
+  const handleSubmit = async () => {
+    if (!campaign) return
+    try {
+      await submitMutation.mutateAsync({
+        campaignId: campaign.id,
+        postUrl,
+        platform: platform as Platform,
+      })
+      setSubmitOpen(false)
+      setPostUrl("")
+      setPlatform("")
+      setAcked(false)
+      toast.success("Submission received", {
+        description:
+          "The creator has 48 hours to review your clip. If not reviewed, it will be auto-approved.",
+      })
+      qc.invalidateQueries({ queryKey: [QK.submissions.mine] })
+    } catch {
+      toast.error("Failed to submit clip")
+    }
   }
 
   return (
@@ -147,55 +267,133 @@ export function CampaignDetailPage() {
         </Button>
       </div>
 
+      {isBannedFromCampaign && (
+        <Alert className="mb-6 border-destructive/40 bg-destructive/10">
+          <Prohibit className="size-4 text-destructive" weight="bold" />
+          <AlertTitle className="text-destructive">
+            You're banned from this campaign
+          </AlertTitle>
+          <AlertDescription>
+            The creator has banned you from participating. New submissions won't
+            be accepted.
+            {banReason && (
+              <>
+                {" "}
+                <span className="font-medium">Reason:</span> {banReason}
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         {/* Main content */}
         <div className="min-w-0 space-y-6">
           {/* Hero video card */}
           <Card className="overflow-hidden border-border/60 bg-card/70 p-0 backdrop-blur">
-            <div className="relative aspect-video w-full overflow-hidden">
-              <img
-                src={campaign.sourceThumbnailUrl}
-                alt={campaign.title}
-                className="h-full w-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-              <button
-                className="absolute inset-0 flex items-center justify-center"
-                aria-label="Play preview"
-              >
-                <span className="flex size-16 items-center justify-center rounded-full bg-background/90 shadow-2xl backdrop-blur transition-transform hover:scale-110">
-                  <PlayCircle
-                    weight="fill"
-                    className="size-10 text-primary"
+            <div className="relative aspect-video w-full overflow-hidden bg-black">
+              {isBannedFromCampaign || campaign.status !== "active" ? (
+                <>
+                  <img
+                    src={campaign.sourceThumbnailUrl}
+                    alt={campaign.title}
+                    className="h-full w-full object-cover opacity-60"
+                    referrerPolicy="no-referrer"
                   />
-                </span>
-              </button>
-              <div className="absolute left-4 top-4 flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="border-success/40 bg-success/10 text-success"
-                >
-                  <Lightning weight="fill" className="size-3" />
-                  Live
-                </Badge>
-              </div>
-              <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <h1 className="text-xl font-semibold text-white sm:text-2xl md:text-3xl">
-                    {campaign.title}
-                  </h1>
-                  <p className="mt-1 line-clamp-1 text-sm text-white/80">
-                    {campaign.description}
-                  </p>
-                </div>
-              </div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "gap-1.5 border px-3 py-1.5 text-sm font-medium backdrop-blur",
+                        isBannedFromCampaign
+                          ? "border-destructive/50 bg-destructive/20 text-destructive"
+                          : campaign.status === "paused"
+                            ? "border-warning/50 bg-warning/20 text-warning"
+                            : "border-border bg-background/80 text-muted-foreground",
+                      )}
+                    >
+                      {isBannedFromCampaign ? (
+                        <>
+                          <Prohibit weight="bold" className="size-4" />
+                          Banned from campaign
+                        </>
+                      ) : campaign.status === "paused" ? (
+                        <>
+                          <Clock weight="fill" className="size-4" />
+                          Campaign paused
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle weight="fill" className="size-4" />
+                          Campaign ended
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                </>
+              ) : driveFileId ? (
+                <iframe
+                  src={`https://drive.google.com/file/d/${driveFileId}/preview`}
+                  className="h-full w-full"
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <>
+                  <img
+                    src={campaign.sourceThumbnailUrl}
+                    alt={campaign.title}
+                    className="h-full w-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <a
+                      href={campaign.sourceContentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex size-16 items-center justify-center rounded-full bg-background/90 shadow-2xl backdrop-blur transition-transform hover:scale-110"
+                    >
+                      <PlayCircle weight="fill" className="size-10 text-primary" />
+                    </a>
+                  </div>
+                </>
+              )}
             </div>
           </Card>
 
+          {/* Title + status */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
+                  {campaign.title}
+                </h1>
+                {campaign.status === "active" ? (
+                  <Badge variant="outline" className="border-success/40 bg-success/10 text-success">
+                    <Lightning weight="fill" className="size-3" />
+                    Live
+                  </Badge>
+                ) : campaign.status === "paused" ? (
+                  <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">
+                    Paused
+                  </Badge>
+                ) : campaign.status === "completed" ? (
+                  <Badge variant="outline" className="border-border bg-muted text-muted-foreground">
+                    Completed
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {campaign.description}
+              </p>
+            </div>
+          </div>
+
           {/* Creator card */}
           <Card className="border-border/60 bg-card/70 backdrop-blur">
-            <CardContent className="flex items-center gap-4 p-4 md:p-6">
-              <Avatar className="size-12 ring-2 ring-primary/20">
+            <CardContent className="flex items-center gap-4 p-4">
+              <Avatar className="size-10 ring-2 ring-primary/20">
                 <AvatarImage src={campaign.creator.avatarUrl} />
                 <AvatarFallback>
                   {campaign.creator.name.charAt(0)}
@@ -203,7 +401,7 @@ export function CampaignDetailPage() {
               </Avatar>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <p className="truncate font-semibold">
+                  <p className="truncate text-sm font-semibold">
                     {campaign.creator.name}
                   </p>
                   {campaign.creator.verified && (
@@ -219,9 +417,6 @@ export function CampaignDetailPage() {
                   followers
                 </p>
               </div>
-              <Button variant="outline" size="sm">
-                View profile
-              </Button>
             </CardContent>
           </Card>
 
@@ -235,11 +430,10 @@ export function CampaignDetailPage() {
             </CardHeader>
             <CardContent>
               {campaign.requirementsType === "native" ? (
-                <div className="rounded-lg border border-border/60 bg-background/50 p-4">
-                  <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-line">
-                    {campaign.requirementsText}
-                  </p>
-                </div>
+                <div
+                  className="rounded-lg border border-border/60 bg-background/50 p-4 text-sm leading-relaxed text-foreground/90 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h1:first-child]:mt-0 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2:first-child]:mt-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-0.5 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_u]:underline"
+                  dangerouslySetInnerHTML={{ __html: campaign.requirementsText ?? "" }}
+                />
               ) : (
                 <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/50 p-4">
                   <div className="min-w-0 flex-1">
@@ -296,51 +490,114 @@ export function CampaignDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Source content */}
-          <Card className="border-border/60 bg-card/70 backdrop-blur">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CloudArrowDown className="size-4 text-primary" />
-                Source content
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
-                <img
-                  src={campaign.sourceThumbnailUrl}
-                  alt="Source thumbnail"
-                  className="h-20 w-32 shrink-0 rounded-lg object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">
-                    Original video hosted on Google Drive
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {campaign.sourceContentUrl}
-                  </p>
+          {/* Source content — hidden for paused/completed campaigns and banned clippers */}
+          {campaign.status === "active" && !isBannedFromCampaign && (
+            <Card className="border-border/60 bg-card/70 backdrop-blur">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CloudArrowDown className="size-4 text-primary" />
+                  Source content
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
+                  <img
+                    src={campaign.sourceThumbnailUrl}
+                    alt="Source thumbnail"
+                    className="h-20 w-32 shrink-0 rounded-lg object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      Original video hosted on Google Drive
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {campaign.sourceContentUrl}
+                    </p>
+                  </div>
+                  <Button size="sm" asChild>
+                    <a
+                      href={campaign.sourceContentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Download source
+                      <CloudArrowDown className="size-4" />
+                    </a>
+                  </Button>
                 </div>
-                <Button size="sm" asChild>
-                  <a
-                    href={campaign.sourceContentUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                <Alert className="mt-4 border-warning/30 bg-warning/10">
+                  <Info className="size-4 text-warning" />
+                  <AlertTitle className="text-warning">Heads up</AlertTitle>
+                  <AlertDescription>
+                    Don't reupload source files or share credentials. Use this
+                    material only to produce short-form clips within this
+                    campaign's rules.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* My submissions for this campaign */}
+          {myClips.length > 0 && (
+            <Card className="border-border/60 bg-card/70 backdrop-blur">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ListChecks className="size-4 text-primary" />
+                  My submissions ({myClips.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {myClips.map((clip) => (
+                  <div
+                    key={clip.id}
+                    className="flex flex-col gap-2 rounded-lg border border-border/50 bg-background/40 p-3 md:flex-row md:items-center md:gap-3"
                   >
-                    Download source
-                    <CloudArrowDown className="size-4" />
-                  </a>
-                </Button>
-              </div>
-              <Alert className="mt-4 border-warning/30 bg-warning/10 text-warning-foreground">
-                <Info className="size-4" />
-                <AlertTitle>Heads up</AlertTitle>
-                <AlertDescription className="text-muted-foreground">
-                  Don't reupload source files or share credentials. Use this
-                  material only to produce short-form clips within this
-                  campaign's rules.
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ClipStatusBadge status={clip.status} isBanned={clip.isBanned} />
+                        <span className="text-xs text-muted-foreground">
+                          {timeAgo(clip.submittedAt)}
+                        </span>
+                      </div>
+                      {clip.status === "pending" && clip.autoApproveAt && (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="size-3" />
+                          Auto-approves in {timeUntil(clip.autoApproveAt)}
+                        </p>
+                      )}
+                      {clip.status === "paid" && clip.payoutAmount && (
+                        <p className="mt-1 text-sm font-semibold text-primary">
+                          +{formatCurrency(clip.payoutAmount)}
+                        </p>
+                      )}
+                      {clip.status === "rejected" && clip.rejectionReason && (
+                        <div className="mt-2 w-fit max-w-full rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
+                          <span className="font-medium">
+                            {clip.isBanned ? "Banned — reason:" : "Reason:"}
+                          </span>{" "}
+                          {clip.rejectionReason}
+                        </div>
+                      )}
+                    </div>
+                    {clip.viewsAtDay30 != null && (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Eye className="size-3" />
+                        {formatCompactNumber(clip.viewsAtDay30)} views
+                      </div>
+                    )}
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={clip.postUrl} target="_blank" rel="noopener noreferrer">
+                        View
+                        <ArrowSquareOut className="size-3" />
+                      </a>
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -410,54 +667,88 @@ export function CampaignDetailPage() {
               <Button
                 className="mt-6 w-full"
                 size="lg"
+                disabled={!canSubmit}
                 onClick={() => setSubmitOpen(true)}
               >
-                <CurrencyDollar className="size-4" weight="bold" />
-                Submit my clip
+                {isBannedFromCampaign ? (
+                  <Prohibit className="size-4" weight="bold" />
+                ) : (
+                  <CurrencyDollar className="size-4" weight="bold" />
+                )}
+                {isBannedFromCampaign
+                  ? "You're banned"
+                  : campaign.status === "paused"
+                    ? "Campaign paused"
+                    : campaign.status === "completed"
+                      ? "Campaign ended"
+                      : budgetRemaining <= 0
+                        ? "Budget exhausted"
+                        : "Submit my clip"}
               </Button>
               <p className="mt-3 text-center text-[11px] text-muted-foreground">
-                AI pre-screening + 48h creator review
+                {isBannedFromCampaign
+                  ? "The creator banned you from participating in this campaign."
+                  : campaign.status === "paused"
+                    ? "This campaign is temporarily paused by the creator."
+                    : campaign.status === "completed"
+                      ? "This campaign has ended."
+                      : budgetRemaining <= 0
+                        ? "This campaign has no available budget right now."
+                        : "48h creator review or auto-approve"}
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Payout example
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">10,000 views</span>
-                <span className="font-semibold tabular-nums">
-                  {formatCurrency(10 * campaign.rewardRatePer1k)}
-                </span>
+          {payoutTiers.length > 0 && (
+            <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Payout example
+              </p>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Based on {formatCurrency(budgetRemaining)} remaining
+                {campaign.maxPayoutPerClip
+                  ? ` · ${formatCurrency(campaign.maxPayoutPerClip)} max per clip`
+                  : ""}
+              </p>
+              <div className="space-y-2 text-sm">
+                {payoutTiers.map((t) => (
+                  <div key={t.views} className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      {formatCompactNumber(t.views)} views
+                      {t.isMax && (
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wide text-primary">
+                          max
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        "font-semibold tabular-nums",
+                        t.isMax && "text-primary"
+                      )}
+                    >
+                      {formatCurrency(t.payout)}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">50,000 views</span>
-                <span className="font-semibold tabular-nums">
-                  {formatCurrency(50 * campaign.rewardRatePer1k)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">100,000 views</span>
-                <span className="font-semibold tabular-nums text-primary">
-                  {formatCurrency(100 * campaign.rewardRatePer1k)}
-                </span>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
 
       {/* Submit Dialog */}
-      <Dialog open={submitOpen} onOpenChange={setSubmitOpen}>
+      <Dialog
+        open={submitOpen}
+        onOpenChange={(open) => {
+          if (!submitting) setSubmitOpen(open)
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Submit your clip</DialogTitle>
             <DialogDescription>
-              Paste your posted clip URL. Make sure your clip has at least{" "}
-              {formatCompactNumber(campaign.minPayoutThreshold)} views before
-              submitting.
+              Paste the URL of your published clip on one of the allowed platforms.
             </DialogDescription>
           </DialogHeader>
 
@@ -511,17 +802,24 @@ export function CampaignDetailPage() {
                 className="mt-0.5"
               />
               <span>
-                I confirm my clip meets all campaign requirements and has at
-                least {formatCompactNumber(campaign.minPayoutThreshold)} views.
+                I have read and agree to follow all campaign requirements.
               </span>
             </label>
           </div>
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setSubmitOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={submitting}
+              onClick={() => setSubmitOpen(false)}
+            >
               Cancel
             </Button>
-            <Button disabled={!formValid} onClick={handleSubmit}>
+            <Button
+              disabled={!formValid}
+              loading={submitting}
+              onClick={handleSubmit}
+            >
               Submit clip
             </Button>
           </DialogFooter>
@@ -557,6 +855,54 @@ function StatMini({
       </div>
       <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
     </div>
+  )
+}
+
+function ClipStatusBadge({ status, isBanned }: { status: string; isBanned?: boolean }) {
+  if (isBanned) {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1.5 border-destructive/40 bg-destructive/10 text-destructive"
+      >
+        <Prohibit className="size-3" weight="bold" />
+        Banned
+      </Badge>
+    )
+  }
+  const config: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
+    pending: {
+      label: "Pending review",
+      className: "border-warning/40 bg-warning/10 text-warning",
+      icon: <Clock className="size-3" weight="fill" />,
+    },
+    approved: {
+      label: "Approved",
+      className: "border-success/40 bg-success/10 text-success",
+      icon: <CheckCircle className="size-3" weight="fill" />,
+    },
+    auto_approved: {
+      label: "Auto-approved",
+      className: "border-success/40 bg-success/10 text-success",
+      icon: <CheckCircle className="size-3" weight="fill" />,
+    },
+    paid: {
+      label: "Paid",
+      className: "border-primary/40 bg-primary/10 text-primary",
+      icon: <CurrencyDollar className="size-3" weight="fill" />,
+    },
+    rejected: {
+      label: "Rejected",
+      className: "border-destructive/40 bg-destructive/10 text-destructive",
+      icon: <XCircle className="size-3" weight="fill" />,
+    },
+  }
+  const s = config[status] ?? config.pending
+  return (
+    <Badge variant="outline" className={`gap-1.5 ${s.className}`}>
+      {s.icon}
+      {s.label}
+    </Badge>
   )
 }
 

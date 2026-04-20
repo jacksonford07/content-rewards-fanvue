@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { NavLink, useLocation, useNavigate } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import {
   House,
   FilmSlate,
@@ -12,9 +13,6 @@ import {
   Sparkle,
   SignOut,
   CaretUpDown,
-  User,
-  Gear,
-  ArrowsClockwise,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -43,56 +41,65 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSidebarHover } from "@/components/app-layout"
-import { currentUser } from "@/lib/mock-data"
+import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
+import api from "@/lib/api"
+import { QK } from "@/lib/query-keys"
 
 type UserRole = "clipper" | "creator"
-
-const clipperNav = [
-  { to: "/", label: "Campaigns hub", icon: House, end: true },
-  { to: "/submissions", label: "My submissions", icon: ListChecks, badge: "3" },
-  { to: "/wallet", label: "Wallet & earnings", icon: Wallet },
-]
-
-const creatorNav = [
-  {
-    to: "/creator/campaigns",
-    label: "My campaigns",
-    icon: MegaphoneSimple,
-  },
-  {
-    to: "/creator/inbox",
-    label: "Submission inbox",
-    icon: Tray,
-    badge: "2",
-  },
-  { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
-]
-
-const bottomNav = [
-  { to: "/notifications", label: "Notifications", icon: Bell, badge: "4" },
-]
 
 export function AppSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
   const { setPopoverOpen } = useSidebarHover()
   const { state, isMobile } = useSidebar()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null)
   const portalRef = useCallback((node: HTMLDivElement | null) => setPortalContainer(node), [])
 
-  const [role, setRole] = useState<UserRole>(() => {
-    return (localStorage.getItem("cr_role") as UserRole) || "clipper"
-  })
+  const role: UserRole = user?.role === "creator" ? "creator" : "clipper"
 
-  const switchRole = () => {
-    const newRole: UserRole = role === "clipper" ? "creator" : "clipper"
-    setRole(newRole)
-    localStorage.setItem("cr_role", newRole)
-    toast.success(`Switched to ${newRole === "clipper" ? "Clipper" : "Creator"} mode`)
-    navigate(newRole === "clipper" ? "/" : "/creator/campaigns")
-  }
+  // Dynamic counts — powered by React Query (cached + invalidated via mutations)
+  const { data: mySubCount = 0 } = useQuery({
+    queryKey: [QK.submissions.mine, "sidebarCount"] as const,
+    queryFn: async () => {
+      const r = await api.get("/submissions/mine/stats")
+      return (r.data.pending as number) ?? 0
+    },
+  })
+  const { data: inboxCount = 0 } = useQuery({
+    queryKey: [QK.submissions.inbox, "sidebarCount"] as const,
+    queryFn: async () => {
+      const r = await api.get("/submissions/inbox/stats")
+      return (r.data.pending as number) ?? 0
+    },
+  })
+  const { data: notifCount = 0 } = useQuery({
+    queryKey: [QK.notifications.list, "sidebarCount"] as const,
+    queryFn: async () => {
+      const r = await api.get("/notifications?page=1&limit=1")
+      return (r.data.unreadCount as number) ?? 0
+    },
+  })
+  const counts = { submissions: mySubCount, inbox: inboxCount, notifications: notifCount }
+
+  const clipperNav = useMemo(() => [
+    { to: "/", label: "Campaigns hub", icon: House, end: true },
+    { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
+    { to: "/wallet", label: "Wallet & earnings", icon: Wallet },
+  ], [counts.submissions])
+
+  const creatorNav = useMemo(() => [
+    { to: "/creator/campaigns", label: "My campaigns", icon: MegaphoneSimple },
+    { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
+    { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
+    { to: "/wallet", label: "Wallet", icon: Wallet },
+  ], [counts.inbox])
+
+  const bottomNav = useMemo(() => [
+    { to: "/notifications", label: "Notifications", icon: Bell, badge: counts.notifications || undefined },
+  ], [counts.notifications])
 
   const mainNav = role === "clipper" ? clipperNav : creatorNav
   const roleLabel = role === "clipper" ? "Clipper" : "Creator"
@@ -147,7 +154,6 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       asChild
                       isActive={active}
-                      tooltip={item.label}
                     >
                       <NavLink to={item.to} end={end}>
                         <Icon className="size-5" weight={active ? "fill" : "regular"} />
@@ -169,12 +175,6 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={switchRole} tooltip={`Switch to ${role === "clipper" ? "Creator" : "Clipper"}`}>
-                  <ArrowsClockwise className="size-5" />
-                  <span>Switch to {role === "clipper" ? "Creator" : "Clipper"}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               {bottomNav.map((item) => {
                 const Icon = item.icon
                 const active = location.pathname.startsWith(item.to)
@@ -183,7 +183,6 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       asChild
                       isActive={active}
-                      tooltip={item.label}
                     >
                       <NavLink to={item.to}>
                         <Icon className="size-5" weight={active ? "fill" : "regular"} />
@@ -213,13 +212,13 @@ export function AppSidebar() {
               )}
             >
               <Avatar className="size-7 shrink-0 ring-1 ring-sidebar-border">
-                <AvatarImage src={currentUser.avatarUrl} />
-                <AvatarFallback>AM</AvatarFallback>
+                <AvatarImage src={user?.avatarUrl ?? ""} />
+                <AvatarFallback>{user?.displayName?.charAt(0) ?? "?"}</AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
-                <p className="text-sm font-medium truncate">{currentUser.name}</p>
+                <p className="text-sm font-medium truncate">{user?.displayName}</p>
                 <p className="text-[11px] text-muted-foreground truncate">
-                  @{currentUser.handle}
+                  @{user?.handle}
                 </p>
               </div>
               <CaretUpDown className="size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
@@ -234,37 +233,25 @@ export function AppSidebar() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex items-center gap-2">
                 <Avatar className="size-8 ring-1 ring-border">
-                  <AvatarImage src={currentUser.avatarUrl} />
-                  <AvatarFallback>AM</AvatarFallback>
+                  <AvatarImage src={user?.avatarUrl ?? ""} />
+                  <AvatarFallback>{user?.displayName?.charAt(0) ?? "?"}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{currentUser.name}</p>
+                  <p className="text-sm font-medium truncate">{user?.displayName}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    @{currentUser.handle}
+                    @{user?.handle}
                   </p>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <User className="size-4" />
-              Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Gear className="size-4" />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={switchRole}>
-              <ArrowsClockwise className="size-4" />
-              Switch to {role === "clipper" ? "Creator" : "Clipper"}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
+              variant="destructive"
               onClick={() => {
+                logout()
                 toast.success("Signed out")
                 navigate("/login")
               }}
-              className="text-destructive focus:text-destructive"
             >
               <SignOut className="size-4" />
               Sign out

@@ -16,6 +16,8 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/react-query": "^5.60.0",
+    "@tanstack/react-query-devtools": "^5.60.0",
     "@tiptap/extension-placeholder": "^3.22.3",
     "@tiptap/extension-text-align": "^3.22.3",
     "@tiptap/extension-underline": "^3.22.3",

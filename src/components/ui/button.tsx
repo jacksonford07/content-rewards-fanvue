@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
+import { CircleNotch } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
 
@@ -44,21 +45,45 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    loading?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  const showLoader = loading && !asChild
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, className }), showLoader && "relative")}
+      disabled={disabled || showLoader || undefined}
+      aria-busy={showLoader || undefined}
       {...props}
-    />
+    >
+      {showLoader ? (
+        <>
+          <span
+            className="invisible inline-flex items-center"
+            style={{ gap: "inherit" }}
+          >
+            {children}
+          </span>
+          <CircleNotch
+            weight="bold"
+            className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 animate-spin"
+          />
+        </>
+      ) : (
+        children
+      )}
+    </Comp>
   )
 }
 

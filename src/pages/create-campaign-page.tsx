@@ -9,18 +9,19 @@ import {
   CloudArrowUp,
   CircleNotch,
   CheckCircle,
-  FilmSlate,
   WarningCircle,
   CurrencyDollar,
-  CreditCard,
   Wallet,
   Sparkle,
   Info,
+  ArrowCircleUp,
+  FloppyDisk,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -34,6 +35,24 @@ import {
   AlertTitle,
 } from "@/components/ui/alert"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -43,9 +62,23 @@ import {
 } from "@/components/ui/breadcrumb"
 import { RichTextEditor, getTextLength } from "@/components/rich-text-editor"
 import { PlatformIcon } from "@/components/platform-icon"
-import { formatCurrency, myCampaigns, platformLabels } from "@/lib/mock-data"
-import type { Platform, RequirementsType } from "@/lib/types"
+import { formatCurrency, platformLabels } from "@/lib/mock-data"
+import api from "@/lib/api"
+import {
+  useCreateCampaign,
+  useFundCampaign,
+  useUpdateCampaign,
+} from "@/queries/campaigns"
+import { useTopup } from "@/queries/wallet"
+import { NotFoundCard } from "@/components/not-found-card"
+import { useAuth } from "@/hooks/use-auth"
+import type { Campaign, Platform, RequirementsType } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 const allSteps = [
   { id: 1, label: "Basics", description: "Title & description" },
@@ -56,30 +89,95 @@ const allSteps = [
   { id: 6, label: "Fund", description: "Escrow payment" },
 ]
 
+function getFirstIncompleteStep(c: Campaign): number {
+  if (!c.title || c.title === "Untitled draft") return 1
+  if (!c.description) return 1
+  const hasReqs = c.requirementsType === "native"
+    ? (c.requirementsText ?? "").length > 10
+    : (c.requirementsUrl ?? "").startsWith("http")
+  if (!hasReqs) return 2
+  if (!c.sourceContentUrl?.startsWith("http")) return 3
+  if (!c.allowedPlatforms?.length) return 4
+  if (!c.rewardRatePer1k || c.rewardRatePer1k <= 0) return 5
+  return 6
+}
+
 export function CreateCampaignPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const editing = Boolean(id)
-  const existing = editing ? myCampaigns.find((c) => c.id === id) : undefined
+  const { user, refresh } = useAuth()
+  const createMutation = useCreateCampaign()
+  const updateMutation = useUpdateCampaign()
+  const fundMutation = useFundCampaign()
+  const topupMutation = useTopup()
+  const [, setExisting] = useState<Campaign | undefined>()
+  const [loadError, setLoadError] = useState(false)
+  const [loadingExisting, setLoadingExisting] = useState(Boolean(id))
+  const [topupOpen, setTopupOpen] = useState(false)
+  const [topupAmount, setTopupAmount] = useState("")
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [leaveOpen, setLeaveOpen] = useState(false)
+  const [initialSnapshot, setInitialSnapshot] = useState("")
 
   const [step, setStep] = useState(1)
+  const [maxStep, setMaxStep] = useState(1)
   const stepRefs = useRef<(HTMLLIElement | null)[]>([])
   const [state, setState] = useState(() => ({
-    title: existing?.title ?? "",
-    description: existing?.description ?? "",
-    requirementsType: (existing?.requirementsType ?? "native") as RequirementsType,
-    requirementsText: existing?.requirementsText ?? "",
-    requirementsUrl: existing?.requirementsUrl ?? "",
-    sourceUrl: existing?.sourceContentUrl ?? "",
-    platforms: (existing?.allowedPlatforms ?? []) as Platform[],
-    rewardRate: existing ? existing.rewardRatePer1k.toString() : "3.00",
-    totalBudget: existing ? existing.totalBudget.toString() : "1000",
-    minThreshold: existing ? existing.minPayoutThreshold.toString() : "2000",
-    maxPerClip: existing?.maxPayoutPerClip
-      ? existing.maxPayoutPerClip.toString()
-      : "",
-    paymentMethod: "wallet" as "wallet" | "card",
+    title: "",
+    description: "",
+    requirementsType: "native" as RequirementsType,
+    requirementsText: "",
+    requirementsUrl: "",
+    sourceUrl: "",
+    platforms: [] as Platform[],
+    rewardRate: "3.00",
+    totalBudget: "1000",
+    minThreshold: "2000",
+    maxPerClip: "",
   }))
+
+  useEffect(() => {
+    if (!id) {
+      setInitialSnapshot(JSON.stringify(state))
+      return
+    }
+    setLoadingExisting(true)
+    setLoadError(false)
+    api.get(`/campaigns/${id}`).then((res) => {
+      const c: Campaign = res.data
+      setExisting(c)
+      const loaded = {
+        title: c.title,
+        description: c.description,
+        requirementsType: c.requirementsType,
+        requirementsText: c.requirementsText ?? "",
+        requirementsUrl: c.requirementsUrl ?? "",
+        sourceUrl: c.sourceContentUrl,
+        platforms: c.allowedPlatforms,
+        rewardRate: c.rewardRatePer1k.toString(),
+        totalBudget: c.totalBudget.toString(),
+        minThreshold: c.minPayoutThreshold.toString(),
+        maxPerClip: c.maxPayoutPerClip ? c.maxPayoutPerClip.toString() : "",
+      }
+      setState(loaded)
+      setInitialSnapshot(JSON.stringify(loaded))
+      // Published campaigns cannot be edited — redirect
+      if (c.status !== "draft" && c.status !== "pending_budget") {
+        navigate("/creator/campaigns", { replace: true })
+        return
+      }
+      const nextStep = getFirstIncompleteStep(c)
+      setStep(nextStep)
+      setMaxStep(nextStep)
+    }).catch(() => setLoadError(true)).finally(() => setLoadingExisting(false))
+  }, [id])
+
+  // Track highest step reached
+  useEffect(() => {
+    setMaxStep((prev) => Math.max(prev, step))
+  }, [step])
 
   // Scroll active step into view
   useEffect(() => {
@@ -90,8 +188,17 @@ export function CreateCampaignPage() {
     })
   }, [step])
 
-  // In edit mode we skip the "Fund" step — budget is already in escrow.
-  const steps = editing ? allSteps.slice(0, 5) : allSteps
+  const hasChanges = initialSnapshot !== "" && JSON.stringify(state) !== initialSnapshot
+
+  const handleBack = () => {
+    if (hasChanges) {
+      setLeaveOpen(true)
+    } else {
+      navigate("/creator/campaigns")
+    }
+  }
+
+  const steps = allSteps
 
   const update = <K extends keyof typeof state>(
     key: K,
@@ -107,6 +214,22 @@ export function CreateCampaignPage() {
     }))
   }
 
+  const budgetNum = parseFloat(state.totalBudget || "0")
+  const rateNum = parseFloat(state.rewardRate || "0")
+  const minViewsNum = parseFloat(state.minThreshold || "0")
+  const maxPerClipNum = parseFloat(state.maxPerClip || "0")
+  const clipsAffordable = rateNum
+    ? Math.floor(budgetNum / (parseFloat(state.maxPerClip || "50") || 50))
+    : 0
+
+  // Single-clip payout at exactly min views (capped by maxPerClip if set)
+  const payoutAtMin = rateNum > 0 ? (minViewsNum / 1000) * rateNum : 0
+  const cappedPayoutAtMin = maxPerClipNum > 0 ? Math.min(payoutAtMin, maxPerClipNum) : payoutAtMin
+  const minThresholdExceedsBudget =
+    budgetNum > 0 && rateNum > 0 && minViewsNum > 0 && cappedPayoutAtMin > budgetNum
+  const maxAllowedMinViews =
+    budgetNum > 0 && rateNum > 0 ? Math.floor((budgetNum / rateNum) * 1000) : 0
+
   const canNext = useMemo(() => {
     if (step === 1) return state.title.trim() && state.description.trim()
     if (step === 2)
@@ -119,28 +242,126 @@ export function CreateCampaignPage() {
       return (
         parseFloat(state.rewardRate) > 0 &&
         parseFloat(state.totalBudget) >= 100 &&
-        parseFloat(state.minThreshold) >= 500
+        parseFloat(state.minThreshold) >= 0
       )
     return true
   }, [step, state])
 
-  const budgetNum = parseFloat(state.totalBudget || "0")
-  const rateNum = parseFloat(state.rewardRate || "0")
-  const clipsAffordable = rateNum
-    ? Math.floor(budgetNum / (parseFloat(state.maxPerClip || "50") || 50))
-    : 0
+  const [showMinThresholdError, setShowMinThresholdError] = useState(false)
+  useEffect(() => {
+    if (!minThresholdExceedsBudget) setShowMinThresholdError(false)
+  }, [minThresholdExceedsBudget])
 
-  const handlePublish = () => {
-    if (editing) {
-      toast.success("Campaign updated", {
-        description: `${state.title} changes are saved.`,
+  const validateRewards = (): boolean => {
+    if (minThresholdExceedsBudget) {
+      setShowMinThresholdError(true)
+      if (step !== 5) setStep(5)
+      toast.error("Min views too high for this budget", {
+        description: `At ${formatCurrency(rateNum)}/1K views, a single clip would pay ${formatCurrency(
+          cappedPayoutAtMin,
+        )} — more than the ${formatCurrency(budgetNum)} budget. Max allowed: ${maxAllowedMinViews.toLocaleString()} views.`,
       })
-    } else {
+      return false
+    }
+    return true
+  }
+
+  const buildPayload = () => {
+    const fileId = extractGDriveFileId(state.sourceUrl)
+    const thumbUrl = fileId
+      ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+      : null
+    return {
+      title: state.title,
+      description: state.description,
+      requirementsType: state.requirementsType,
+      requirementsText: state.requirementsText,
+      requirementsUrl: state.requirementsUrl,
+      sourceContentUrl: state.sourceUrl,
+      sourceThumbnailUrl: thumbUrl,
+      allowedPlatforms: state.platforms,
+      rewardRatePer1k: parseFloat(state.rewardRate) || 0,
+      totalBudget: parseFloat(state.totalBudget) || 0,
+      minPayoutThreshold: parseFloat(state.minThreshold) || 0,
+      maxPayoutPerClip: state.maxPerClip ? parseFloat(state.maxPerClip) : undefined,
+    }
+  }
+
+  const saveCampaign = async (status: "draft" | "pending_budget") => {
+    const payload = { ...buildPayload(), status }
+    const cid = draftId || id
+    if (cid) {
+      await updateMutation.mutateAsync({ id: cid, body: payload })
+      return cid
+    }
+    const data = await createMutation.mutateAsync(payload)
+    setDraftId(data.id)
+    return data.id as string
+  }
+
+  const handleSaveDraft = async () => {
+    if (!validateRewards()) return
+    setSaving(true)
+    try {
+      await saveCampaign("draft")
+      toast.success("Draft saved")
+    } catch {
+      toast.error("Failed to save draft")
+    }
+    setSaving(false)
+  }
+
+  const handleSaveAsPending = async () => {
+    if (!validateRewards()) return
+    setSaving(true)
+    try {
+      await saveCampaign("pending_budget")
+      toast.success("Campaign saved", {
+        description: "Fund it any time from the budget page.",
+      })
+      navigate("/creator/campaigns")
+    } catch {
+      toast.error("Failed to save campaign")
+    }
+    setSaving(false)
+  }
+
+  const handlePublish = async () => {
+    if (!validateRewards()) return
+    setSaving(true)
+    try {
+      const cid = await saveCampaign("pending_budget")
+      await fundMutation.mutateAsync({
+        id: cid,
+        amount: parseFloat(state.totalBudget),
+      })
+      await refresh()
       toast.success("Campaign created and funded", {
         description: `${state.title} is now live in the hub.`,
       })
+      navigate("/creator/campaigns")
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || ""
+      if (msg.includes("Insufficient wallet balance")) {
+        toast.error("Insufficient wallet balance", {
+          description: "Top up your wallet before funding a campaign.",
+        })
+      } else {
+        toast.error("Failed to create campaign")
+      }
     }
-    navigate("/creator/campaigns")
+    setSaving(false)
+  }
+
+  if (loadError) {
+    return (
+      <NotFoundCard
+        title="Campaign not found"
+        description="This draft may have been deleted, or the link is outdated."
+        backTo="/creator/campaigns"
+        backLabel="Back to campaigns"
+      />
+    )
   }
 
   return (
@@ -161,11 +382,9 @@ export function CreateCampaignPage() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/creator/campaigns">
-            <ArrowLeft className="size-4" />
-            Back
-          </Link>
+        <Button variant="ghost" size="sm" onClick={handleBack}>
+          <ArrowLeft className="size-4" />
+          Back
         </Button>
       </div>
 
@@ -184,17 +403,18 @@ export function CreateCampaignPage() {
       <div className="mb-6 overflow-x-auto no-scrollbar">
         <ol className="flex min-w-max items-center gap-2">
           {steps.map((s, i) => {
-            const done = s.id < step
+            const done = s.id <= maxStep && s.id !== step
             const current = s.id === step
             return (
               <li key={s.id} ref={(el) => { stepRefs.current[i] = el }} className="flex items-center gap-2">
                 <div
                   className={cn(
                     "flex flex-col items-start gap-1 rounded-xl border px-3 py-2 transition-colors min-w-[136px]",
-                    done && "border-success/40 bg-success/5",
+                    done && "border-success/40 bg-success/5 cursor-pointer hover:bg-success/10",
                     current && "border-primary/50 bg-primary/10",
                     !done && !current && "border-border/60 bg-card/60"
                   )}
+                  onClick={() => { if (s.id <= maxStep) setStep(s.id) }}
                 >
                   <div className="flex items-center gap-2">
                     <div
@@ -234,7 +454,20 @@ export function CreateCampaignPage() {
 
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardContent className="p-6">
-          {step === 1 && (
+          {loadingExisting ? (
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            </div>
+          ) : null}
+
+          {!loadingExisting && step === 1 && (
             <div className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="title">Campaign title</Label>
@@ -261,7 +494,7 @@ export function CreateCampaignPage() {
             </div>
           )}
 
-          {step === 2 && (
+          {!loadingExisting && step === 2 && (
             <div className="space-y-5">
               <RadioGroup
                 value={state.requirementsType}
@@ -313,7 +546,7 @@ export function CreateCampaignPage() {
             </div>
           )}
 
-          {step === 3 && (
+          {!loadingExisting && step === 3 && (
             <div className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="sourceUrl">Google Drive video URL</Label>
@@ -337,7 +570,7 @@ export function CreateCampaignPage() {
             </div>
           )}
 
-          {step === 4 && (
+          {!loadingExisting && step === 4 && (
             <div className="space-y-3">
               <p className="text-sm font-medium">
                 Select all platforms where clippers can post
@@ -381,7 +614,7 @@ export function CreateCampaignPage() {
             </div>
           )}
 
-          {step === 5 && (
+          {!loadingExisting && step === 5 && (
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -389,32 +622,39 @@ export function CreateCampaignPage() {
                   <div className="relative">
                     <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       className="pl-9 tabular-nums"
                       value={state.rewardRate}
-                      onChange={(e) => update("rewardRate", e.target.value)}
+                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("rewardRate", v) }}
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Total budget</Label>
+                  <Label>Total budget (min $100)</Label>
                   <div className="relative">
                     <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       className="pl-9 tabular-nums"
                       value={state.totalBudget}
-                      onChange={(e) => update("totalBudget", e.target.value)}
+                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("totalBudget", v) }}
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Min views before submittable</Label>
                   <Input
-                    type="number"
-                    className="tabular-nums"
+                    type="text"
+                    inputMode="numeric"
+                    aria-invalid={showMinThresholdError || undefined}
+                    className={cn(
+                      "tabular-nums",
+                      showMinThresholdError && "border-destructive focus-visible:ring-destructive/40"
+                    )}
                     value={state.minThreshold}
-                    onChange={(e) => update("minThreshold", e.target.value)}
+                    onChange={(e) => update("minThreshold", e.target.value.replace(/[^0-9]/g, "").replace(/^0+(\d)/, "$1"))}
                   />
                   <p className="text-[11px] text-muted-foreground">
                     Clippers can't submit clips with fewer views
@@ -425,11 +665,12 @@ export function CreateCampaignPage() {
                   <div className="relative">
                     <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       className="pl-9 tabular-nums"
                       placeholder="Unlimited"
                       value={state.maxPerClip}
-                      onChange={(e) => update("maxPerClip", e.target.value)}
+                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("maxPerClip", v) }}
                     />
                   </div>
                   <p className="text-[11px] text-muted-foreground">
@@ -469,57 +710,46 @@ export function CreateCampaignPage() {
             </div>
           )}
 
-          {step === 6 && (
+          {!loadingExisting && step === 6 && (
             <div className="space-y-5">
               <p className="text-sm font-medium">
                 Fund your escrow — your campaign goes live once payment clears.
               </p>
 
-              <RadioGroup
-                value={state.paymentMethod}
-                onValueChange={(v) =>
-                  update("paymentMethod", v as "wallet" | "card")
-                }
-                className="grid gap-3"
-              >
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors",
-                    state.paymentMethod === "wallet"
-                      ? "border-primary/60 bg-primary/10"
-                      : "border-border/70 bg-background/50"
-                  )}
-                >
-                  <RadioGroupItem value="wallet" className="shrink-0" />
-                  <Wallet className="size-5 text-primary" weight="fill" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Fanvue wallet balance</p>
-                    <p className="text-xs text-muted-foreground">
-                      Available balance: {formatCurrency(1248.65)}
-                    </p>
-                  </div>
+              <div className={cn(
+                "flex items-center gap-3 rounded-xl border p-4",
+                (user?.walletBalance ?? 0) >= budgetNum
+                  ? "border-primary/60 bg-primary/10"
+                  : "border-warning/60 bg-warning/10"
+              )}>
+                <Wallet className="size-5 text-primary" weight="fill" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Fanvue wallet balance</p>
+                  <p className="text-xs text-muted-foreground">
+                    Available balance: {formatCurrency(user?.walletBalance ?? 0)}
+                  </p>
+                </div>
+                {(user?.walletBalance ?? 0) >= budgetNum ? (
                   <Badge variant="outline" className="border-success/40 bg-success/10 text-success">
                     Instant
                   </Badge>
-                </label>
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors",
-                    state.paymentMethod === "card"
-                      ? "border-primary/60 bg-primary/10"
-                      : "border-border/70 bg-background/50"
-                  )}
-                >
-                  <RadioGroupItem value="card" className="shrink-0" />
-                  <CreditCard className="size-5 text-primary" weight="fill" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Card (Stripe)</p>
-                    <p className="text-xs text-muted-foreground">
-                      Charge automatically from a saved card
-                    </p>
-                  </div>
-                </label>
-              </RadioGroup>
+                ) : (
+                  <Button size="sm" onClick={() => { setTopupAmount(""); setTopupOpen(true) }}>
+                    <ArrowCircleUp className="size-4" weight="fill" />
+                    Top up
+                  </Button>
+                )}
+              </div>
+
+              {(user?.walletBalance ?? 0) < budgetNum && (
+                <Alert className="border-warning/30 bg-warning/5">
+                  <WarningCircle className="size-4 text-warning" weight="fill" />
+                  <AlertTitle>Insufficient balance</AlertTitle>
+                  <AlertDescription>
+                    You need {formatCurrency(budgetNum - (user?.walletBalance ?? 0))} more to fund this campaign. Top up your wallet to continue.
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <Card className="border-border/60 bg-background/50 p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -569,6 +799,7 @@ export function CreateCampaignPage() {
       </Card>
 
       {/* Nav */}
+      {!loadingExisting && (
       <div className="mt-6 flex items-center justify-between">
         <Button
           variant="ghost"
@@ -579,30 +810,172 @@ export function CreateCampaignPage() {
           Back
         </Button>
 
-        {step < steps.length ? (
-          <Button
-            disabled={!canNext}
-            onClick={() => setStep((s) => s + 1)}
-          >
-            Next step
-            <ArrowRight className="size-4" />
-          </Button>
-        ) : (
-          <Button disabled={!canNext} onClick={handlePublish}>
-            {editing ? (
-              <>
-                <Check weight="bold" className="size-4" />
-                Save changes
-              </>
-            ) : (
-              <>
-                <Sparkle weight="fill" className="size-4" />
-                Fund & publish
-              </>
-            )}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {step < steps.length ? (
+            <>
+              <Button
+                variant="outline"
+                loading={saving}
+                onClick={step >= 5 ? handleSaveAsPending : handleSaveDraft}
+              >
+                <FloppyDisk className="size-4" />
+                Save draft
+              </Button>
+              <Button
+                disabled={!canNext}
+                onClick={() => {
+                  if (step === 5 && !validateRewards()) return
+                  setStep((s) => s + 1)
+                }}
+              >
+                Next step
+                <ArrowRight className="size-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                loading={saving}
+                onClick={handleSaveAsPending}
+              >
+                <FloppyDisk className="size-4" />
+                Save draft
+              </Button>
+              {(() => {
+                const insufficientBalance = (user?.walletBalance ?? 0) < budgetNum
+                const btn = (
+                  <Button
+                    disabled={!canNext || insufficientBalance}
+                    loading={saving}
+                    onClick={handlePublish}
+                  >
+                    <Sparkle weight="fill" className="size-4" />
+                    Fund & publish
+                  </Button>
+                )
+                if (insufficientBalance) {
+                  return (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0}>{btn}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Top up your wallet to fund this campaign
+                      </TooltipContent>
+                    </Tooltip>
+                  )
+                }
+                return btn
+              })()}
+            </>
+          )}
+        </div>
       </div>
+      )}
+
+      {/* Inline top-up dialog */}
+      <Dialog
+        open={topupOpen}
+        onOpenChange={(open) => {
+          if (!topupMutation.isPending) setTopupOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Top up wallet</DialogTitle>
+            <DialogDescription>
+              Add funds to your Fanvue wallet to fund this campaign.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-4 gap-2">
+              {[100, 500, 1000, 5000].map((n) => (
+                <Button
+                  key={n}
+                  variant="outline"
+                  onClick={() => setTopupAmount(n.toString())}
+                >
+                  ${n}
+                </Button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="topup-amount-inline">Custom amount</Label>
+              <Input
+                id="topup-amount-inline"
+                type="number"
+                placeholder="0.00"
+                value={topupAmount}
+                onChange={(e) => setTopupAmount(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={topupMutation.isPending}
+              onClick={() => setTopupOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await topupMutation.mutateAsync(parseFloat(topupAmount) || 0)
+                  toast.success("Wallet topped up", {
+                    description: `${formatCurrency(parseFloat(topupAmount) || 0)} added to your balance.`,
+                  })
+                  await refresh()
+                  setTopupOpen(false)
+                  setTopupAmount("")
+                } catch {
+                  toast.error("Top-up failed")
+                }
+              }}
+              disabled={!topupAmount || parseFloat(topupAmount) <= 0}
+              loading={topupMutation.isPending}
+            >
+              Confirm payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={leaveOpen}
+        onOpenChange={(o) => {
+          if (!saving) setLeaveOpen(o)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Would you like to save them as a draft before leaving?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              disabled={saving}
+              onClick={() => navigate("/creator/campaigns")}
+            >
+              Discard & leave
+            </AlertDialogAction>
+            <Button
+              loading={saving}
+              onClick={async () => {
+                await handleSaveDraft()
+                navigate("/creator/campaigns")
+              }}
+            >
+              Save draft & leave
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -650,33 +1023,38 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
+function extractGDriveFileId(url: string): string | null {
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  return match?.[1] ?? null
+}
+
 type ThumbState = "idle" | "loading" | "success" | "error"
 
 function ThumbnailPreview({ url }: { url: string }) {
   const [state, setState] = useState<ThumbState>("idle")
+  const [thumbUrl, setThumbUrl] = useState("")
   const prevUrl = useRef("")
 
-  // Mock: when a valid-looking URL is entered, simulate fetching thumbnail
   useEffect(() => {
     if (url === prevUrl.current) return
     prevUrl.current = url
 
-    if (!url.trim().startsWith("http")) {
-      setState("idle")
+    const fileId = extractGDriveFileId(url)
+    if (!fileId) {
+      setState(url.trim().startsWith("http") ? "error" : "idle")
+      setThumbUrl("")
       return
     }
 
     setState("loading")
-    const timer = setTimeout(() => {
-      // Mock: treat Google Drive URLs as success, others as error
-      if (url.includes("drive.google.com")) {
-        setState("success")
-      } else {
-        setState("error")
-      }
-    }, 1500)
-
-    return () => clearTimeout(timer)
+    const imgUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+    const img = new Image()
+    img.onload = () => {
+      setThumbUrl(imgUrl)
+      setState("success")
+    }
+    img.onerror = () => setState("error")
+    img.src = imgUrl
   }, [url])
 
   if (state === "idle") {
@@ -730,15 +1108,8 @@ function ThumbnailPreview({ url }: { url: string }) {
   // success
   return (
     <div className="flex items-center gap-3 rounded-xl border border-success/30 bg-success/5 p-5">
-      <div className="relative size-16 shrink-0 overflow-hidden rounded-lg bg-muted">
-        <div className="flex size-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
-          <FilmSlate className="size-6 text-primary/60" weight="fill" />
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-          <div className="flex size-6 items-center justify-center rounded-full bg-white/90">
-            <div className="ml-0.5 size-0 border-y-[5px] border-l-[8px] border-y-transparent border-l-foreground" />
-          </div>
-        </div>
+      <div className="size-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+        <img src={thumbUrl} alt="Video thumbnail" className="size-full object-cover" />
       </div>
       <div className="flex-1">
         <div className="flex items-center gap-1.5">

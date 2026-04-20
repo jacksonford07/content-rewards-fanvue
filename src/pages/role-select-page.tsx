@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   FilmSlate,
@@ -5,20 +6,58 @@ import {
   Scissors,
   MegaphoneSimple,
   ArrowRight,
+  Lock,
 } from "@phosphor-icons/react"
+import { toast } from "sonner"
 
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import api from "@/lib/api"
+import { useAuth } from "@/hooks/use-auth"
+
+type Role = "clipper" | "creator"
+
+const ROLE_COPY: Record<Role, { label: string; blurb: string }> = {
+  clipper: {
+    label: "Clipper",
+    blurb:
+      "You'll browse campaigns, post clips, and earn per 1,000 verified views.",
+  },
+  creator: {
+    label: "Creator",
+    blurb:
+      "You'll launch campaigns, fund budgets in escrow, and review submissions.",
+  },
+}
 
 export function RoleSelectPage() {
   const navigate = useNavigate()
+  const { refresh } = useAuth()
+  const [pendingRole, setPendingRole] = useState<Role | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSelect = (role: "clipper" | "creator") => {
-    localStorage.setItem("cr_role", role)
-    if (role === "clipper") {
-      navigate("/")
-    } else {
-      navigate("/creator/campaigns")
+  const confirmSelect = async () => {
+    if (!pendingRole) return
+    setIsSubmitting(true)
+    try {
+      await api.patch("/users/me", { role: pendingRole })
+      await refresh()
+      navigate(pendingRole === "clipper" ? "/" : "/creator/campaigns")
+    } catch {
+      toast.error("Couldn't save your choice. Please try again.")
+      setIsSubmitting(false)
+      setPendingRole(null)
     }
   }
 
@@ -38,7 +77,7 @@ export function RoleSelectPage() {
               How will you use Content Rewards?
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              You can switch roles anytime from the sidebar.
+              This choice is tied to your Fanvue account and can't be changed later.
             </p>
           </div>
         </div>
@@ -49,13 +88,13 @@ export function RoleSelectPage() {
             icon={<Scissors className="size-7" weight="duotone" />}
             title="I'm a Clipper"
             description="Browse campaigns, create short-form clips, and earn per 1,000 views."
-            onSelect={() => handleSelect("clipper")}
+            onSelect={() => setPendingRole("clipper")}
           />
           <RoleCard
             icon={<MegaphoneSimple className="size-7" weight="duotone" />}
             title="I'm a Creator"
             description="Launch clipping campaigns, fund budgets, and review submissions."
-            onSelect={() => handleSelect("creator")}
+            onSelect={() => setPendingRole("creator")}
           />
         </div>
 
@@ -63,6 +102,48 @@ export function RoleSelectPage() {
           Both roles use your Fanvue creator account. No extra setup needed.
         </p>
       </div>
+
+      <AlertDialog
+        open={!!pendingRole}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) setPendingRole(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-primary/10 text-primary">
+              <Lock weight="fill" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              Continue as{" "}
+              {pendingRole ? ROLE_COPY[pendingRole].label : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRole && ROLE_COPY[pendingRole].blurb}{" "}
+              <span className="mt-2 block font-medium text-foreground">
+                This choice is permanent. You can't switch roles later on this
+                Fanvue account.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>
+              Go back
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                confirmSelect()
+              }}
+              disabled={isSubmitting}
+            >
+              {isSubmitting
+                ? "Saving…"
+                : `Continue as ${pendingRole ? ROLE_COPY[pendingRole].label : ""}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

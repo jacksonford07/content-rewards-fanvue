@@ -9,7 +9,6 @@ import {
   Bank,
   ClipboardText,
   CloudArrowUp,
-  CircleNotch,
   CheckCircle,
   ShieldCheck,
 } from "@phosphor-icons/react"
@@ -36,6 +35,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { cn } from "@/lib/utils"
+import api from "@/lib/api"
+import { useAuth } from "@/hooks/use-auth"
 
 const steps = [
   { id: 1, label: "Personal", description: "Name & address" },
@@ -46,6 +47,7 @@ const steps = [
 
 export function KycPage() {
   const navigate = useNavigate()
+  const { refresh } = useAuth()
   const [step, setStep] = useState(1)
   const stepRefs = useRef<(HTMLLIElement | null)[]>([])
 
@@ -117,11 +119,17 @@ export function KycPage() {
     return true
   }, [step, state])
 
-  const handleSubmit = () => {
-    toast.success("KYC submitted successfully", {
-      description:
-        "Your identity verification is being reviewed. You'll be notified once approved.",
-    })
+  const handleSubmit = async () => {
+    try {
+      await api.post("/kyc")
+      await refresh()
+      toast.success("KYC submitted successfully", {
+        description:
+          "Your identity verification has been approved. You can now withdraw funds.",
+      })
+    } catch {
+      toast.error("KYC submission failed")
+    }
     navigate("/wallet")
   }
 
@@ -325,20 +333,11 @@ export function KycPage() {
               {state.idFrontName && state.idBackName && !state.idVerified && (
                 <Button
                   onClick={handleIdVerify}
-                  disabled={state.idProcessing}
+                  loading={state.idProcessing}
                   className="w-full"
                 >
-                  {state.idProcessing ? (
-                    <>
-                      <CircleNotch className="size-4 animate-spin" />
-                      Verifying document...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="size-4" weight="fill" />
-                      Verify ID
-                    </>
-                  )}
+                  <ShieldCheck className="size-4" weight="fill" />
+                  Verify ID
                 </Button>
               )}
 

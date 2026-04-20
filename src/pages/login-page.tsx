@@ -1,5 +1,4 @@
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useEffect } from "react"
 import {
   FilmSlate,
   Sparkle,
@@ -8,29 +7,40 @@ import {
   Users,
   ShieldCheck,
   ArrowSquareOut,
+  CheckCircle,
+  Confetti,
 } from "@phosphor-icons/react"
+import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 
 export function LoginPage() {
-  const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const error = searchParams.get("error")
 
-  const handleFanvueAuth = () => {
-    setLoading(true)
-    // In production: window.location.href = `${FANVUE_OAUTH_URL}?client_id=...&redirect_uri=...`
-    setTimeout(() => {
-      setLoading(false)
-      toast.success("Welcome back!", {
-        description: "Signed in via Fanvue successfully.",
-      })
-      navigate("/select-role")
-    }, 1500)
+  useEffect(() => {
+    // `not_creator` is an onboarding state, not an error — handled inline.
+    // `fanvue_rejected` covers transient OAuth hiccups (user cancelled, replayed callback,
+    // scope misconfig) — noisy for users, we already log it server-side.
+    // Only surface `auth_failed`, which means something unexpected broke on our side.
+    if (error === "auth_failed") {
+      toast.error("Couldn't sign in. Please try again.")
+    }
+    if (error && error !== "not_creator") {
+      const next = new URLSearchParams(searchParams)
+      next.delete("error")
+      next.delete("reason")
+      next.delete("desc")
+      setSearchParams(next, { replace: true })
+    }
+  }, [error, searchParams, setSearchParams])
+
+  const handleSignIn = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3000"
+    window.location.href = `${apiUrl}/api/auth/fanvue`
   }
 
   return (
@@ -122,89 +132,73 @@ export function LoginPage() {
           {/* Auth card */}
           <Card className="border-border/60 bg-card/80 backdrop-blur">
             <CardContent className="p-6">
-              <div className="mb-6 text-center">
-                {/* Desktop: hide logo since left panel has it */}
-                <div className="mb-4 flex justify-center lg:hidden">
-                  <LogoMark size="lg" />
-                </div>
-                <h1 className="text-xl font-semibold tracking-tight">
-                  Sign in to Content Rewards
-                </h1>
-                <p className="mt-1.5 text-sm text-muted-foreground">
-                  Connect your Fanvue creator account to get started.
-                </p>
-              </div>
+              {error === "not_creator" ? (
+                <CreatorOnboardingView onRetry={handleSignIn} />
+              ) : (
+                <>
+                  <div className="mb-6 text-center">
+                    <div className="mb-4 flex justify-center lg:hidden">
+                      <LogoMark size="lg" />
+                    </div>
+                    <h1 className="text-xl font-semibold tracking-tight">
+                      Sign in to Content Rewards
+                    </h1>
+                    <p className="mt-1.5 text-sm text-muted-foreground">
+                      Use your Fanvue account to get started.
+                    </p>
+                  </div>
 
-              {/* Primary CTA */}
-              <Button
-                className="w-full gap-2"
-                size="lg"
-                onClick={handleFanvueAuth}
-                disabled={loading}
-              >
-                <FanvueLogo />
-                {loading ? "Connecting to Fanvue..." : "Continue with Fanvue"}
-              </Button>
+                  <Button className="w-full" size="lg" onClick={handleSignIn}>
+                    <ArrowSquareOut className="mr-2 size-4" />
+                    Sign in with Fanvue
+                  </Button>
 
-              {/* What happens next */}
-              <div className="mt-6 space-y-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  What happens next
-                </p>
-                <div className="space-y-2.5">
-                  <StepRow
-                    number="1"
-                    text="You'll be redirected to Fanvue to sign in or create an account"
-                  />
-                  <StepRow
-                    number="2"
-                    text="Fanvue verifies your creator account status"
-                  />
-                  <StepRow
-                    number="3"
-                    text="You're brought back here — ready to browse or create campaigns"
-                  />
-                </div>
-              </div>
+                  {import.meta.env.DEV && (
+                    <div className="mt-4 space-y-2 rounded-lg border border-dashed border-yellow-500/40 bg-yellow-500/5 p-3">
+                      <p className="text-center text-xs font-medium text-yellow-600">
+                        Dev Login
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            const apiUrl =
+                              import.meta.env.VITE_API_URL ||
+                              "http://localhost:3000"
+                            window.location.href = `${apiUrl}/api/auth/dev-login?role=clipper`
+                          }}
+                        >
+                          Clipper
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            const apiUrl =
+                              import.meta.env.VITE_API_URL ||
+                              "http://localhost:3000"
+                            window.location.href = `${apiUrl}/api/auth/dev-login?role=creator`
+                          }}
+                        >
+                          Creator
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
-              <Separator className="my-6" />
-
-              {/* Don't have an account */}
-              <div className="text-center">
-                <p className="text-sm text-muted-foreground">
-                  Don't have a Fanvue account?
-                </p>
-                <Button
-                  variant="link"
-                  className="mt-1 h-auto gap-1 p-0 text-primary"
-                  onClick={handleFanvueAuth}
-                  disabled={loading}
-                >
-                  Create one on Fanvue
-                  <ArrowSquareOut className="size-3.5" />
-                </Button>
-              </div>
-
-              {/* Footer */}
-              <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/60">
-                By continuing you agree to Fanvue's Terms of Service.
-                <br />
-                Content Rewards is a third-party app on the Fanvue platform.
-              </p>
+                  <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/60">
+                    By continuing you agree to Fanvue's Terms of Service.
+                    <br />
+                    Content Rewards is a third-party app on the Fanvue
+                    platform.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
-
-          {/* Fan account notice */}
-          <Alert className="border-warning/30 bg-warning/5">
-            <ShieldCheck className="size-4 text-warning" weight="fill" />
-            <AlertDescription className="text-xs text-muted-foreground">
-              <strong className="text-foreground">
-                Have a fan account?
-              </strong>{" "}
-              Content Rewards requires a creator account. You'll be guided
-              through KYC and account upgrade after signing in.
-            </AlertDescription>
-          </Alert>
         </div>
       </div>
     </div>
@@ -214,17 +208,6 @@ export function LoginPage() {
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
-
-function StepRow({ number, text }: { number: string; text: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted text-xs font-semibold text-muted-foreground">
-        {number}
-      </span>
-      <p className="text-sm text-muted-foreground pt-0.5">{text}</p>
-    </div>
-  )
-}
 
 function LogoMark({ size }: { size: "sm" | "lg" }) {
   const s = size === "lg" ? "size-11" : "size-10"
@@ -236,14 +219,17 @@ function LogoMark({ size }: { size: "sm" | "lg" }) {
     <div
       className={cn(
         "relative flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/60 shadow-lg",
-        s
+        s,
       )}
     >
-      <FilmSlate weight="fill" className={cn(icon, "text-primary-foreground")} />
+      <FilmSlate
+        weight="fill"
+        className={cn(icon, "text-primary-foreground")}
+      />
       <span
         className={cn(
           "absolute -right-0.5 -top-0.5 flex items-center justify-center rounded-full bg-background",
-          dot
+          dot,
         )}
       >
         <Sparkle weight="fill" className={cn(dotIcon, "text-primary")} />
@@ -252,21 +238,109 @@ function LogoMark({ size }: { size: "sm" | "lg" }) {
   )
 }
 
-function FanvueLogo() {
+function CreatorOnboardingView({ onRetry }: { onRetry: () => void }) {
   return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0"
-    >
-      <path
-        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15.5v-7L7 14l4-9.5v7l4-3.5-4 9.5z"
-        fill="currentColor"
-      />
-    </svg>
+    <div>
+      <div className="mb-6 text-center">
+        <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20">
+          <Confetti weight="fill" className="size-7 text-primary" />
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight">
+          One quick step to get started
+        </h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          Content Rewards is built for Fanvue creators. Upgrade your
+          account on Fanvue and you're in.
+        </p>
+      </div>
+
+      <div className="mb-6 space-y-3 rounded-lg border border-border/60 bg-background/40 p-4">
+        <OnboardingStep
+          done
+          title="Signed in with Fanvue"
+          description="We recognised your Fanvue account."
+        />
+        <OnboardingStep
+          active
+          title="Become a creator on Fanvue"
+          description="Takes a couple of minutes. You'll stay on Fanvue for this step."
+        />
+        <OnboardingStep
+          title="Come back and finish sign-in"
+          description="Once you're a creator, return here and click Sign in again."
+        />
+      </div>
+
+      <Button className="w-full" size="lg" asChild>
+        <a
+          href="https://www.fanvue.com/myprofile/creator-onboarding"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <ArrowSquareOut className="mr-2 size-4" />
+          Become a Fanvue creator
+        </a>
+      </Button>
+
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-3 w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+      >
+        Already upgraded? Try signing in again
+      </button>
+
+      <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/60">
+        Content Rewards is a third-party app on the Fanvue platform.
+      </p>
+    </div>
+  )
+}
+
+function OnboardingStep({
+  done,
+  active,
+  title,
+  description,
+}: {
+  done?: boolean
+  active?: boolean
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex gap-3">
+      <div
+        className={cn(
+          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
+          done && "bg-primary/15 text-primary",
+          active && "bg-primary text-primary-foreground",
+          !done && !active && "border border-border/60 text-muted-foreground",
+        )}
+      >
+        {done ? (
+          <CheckCircle weight="fill" className="size-5" />
+        ) : active ? (
+          <span className="text-[11px] font-semibold">2</span>
+        ) : (
+          <span className="text-[11px] font-semibold">3</span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p
+          className={cn(
+            "text-sm font-medium leading-tight",
+            done && "text-muted-foreground line-through decoration-muted-foreground/40",
+            !done && "text-foreground",
+          )}
+        >
+          {title}
+        </p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
   )
 }
 

@@ -1,13 +1,11 @@
 import { useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
   ArrowCircleDown,
   ArrowCircleUp,
   Coins,
-  Vault,
   Lightning,
-  PauseCircle,
   CheckCircle,
   Clock,
   CurrencyDollar,
@@ -21,7 +19,6 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { Switch } from "@/components/ui/switch"
 import {
   Dialog,
   DialogContent,
@@ -38,57 +35,129 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
-  myCampaigns,
-  campaignTransactions,
   formatCurrency,
 } from "@/lib/mock-data"
+import { useAuth } from "@/hooks/use-auth"
+import {
+  useCampaign,
+  useCampaignTransactions,
+  useFundCampaign,
+} from "@/queries/campaigns"
+import { NotFoundCard } from "@/components/not-found-card"
+import type { BudgetTransaction } from "@/lib/types"
 
 export function CampaignBudgetPage() {
   const { id } = useParams()
-  const campaign = myCampaigns.find((c) => c.id === id)
+  const navigate = useNavigate()
+  const { refresh } = useAuth()
+  const {
+    data: campaign,
+    isLoading: campaignLoading,
+    isError: campaignError,
+  } = useCampaign(id)
+  const { data: transactionsData = [], isLoading: txLoading } =
+    useCampaignTransactions(id)
+  const transactions = transactionsData as unknown as BudgetTransaction[]
+  const loading = campaignLoading || txLoading
+  const fundMutation = useFundCampaign()
 
   const [addFundsOpen, setAddFundsOpen] = useState(false)
   const [amount, setAmount] = useState("")
-  const [budgetActive, setBudgetActive] = useState(true)
 
-  if (!campaign) {
+  if (loading) {
     return (
       <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6 md:py-8">
-        <p className="text-muted-foreground">Campaign not found.</p>
-        <Button variant="ghost" asChild className="mt-4">
-          <Link to="/creator/campaigns">
-            <ArrowLeft className="size-4" /> Back to campaigns
-          </Link>
-        </Button>
+        <Skeleton className="h-4 w-56 mb-6" />
+        <div className="mb-6 space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="border-border/60 bg-card/70 p-4">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-3 h-7 w-24" />
+              {i === 2 && <Skeleton className="mt-2 h-1.5 w-full" />}
+            </Card>
+          ))}
+        </div>
+        <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_320px]">
+          <Card className="border-border/60 bg-card/70 p-6">
+            <Skeleton className="h-5 w-28 mb-4" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="rounded-lg border border-border/60 p-4 space-y-2">
+                  <Skeleton className="h-3 w-28" />
+                  <Skeleton className="h-6 w-20" />
+                  <Skeleton className="h-3 w-36" />
+                </div>
+              ))}
+            </div>
+          </Card>
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Card className="border-border/60 bg-card/70 p-4">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="mt-1 h-3 w-40" />
+              <Skeleton className="mt-3 h-5 w-16" />
+            </Card>
+          </div>
+        </div>
+        <Card className="border-border/60 bg-card/70 p-6">
+          <Skeleton className="h-5 w-44 mb-4" />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 py-3">
+              <Skeleton className="size-9 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
+        </Card>
       </div>
     )
   }
+
+  if (campaignError || (!loading && !campaign)) {
+    return (
+      <NotFoundCard
+        title="Campaign not found"
+        description="This campaign may have been deleted, or the link is outdated."
+        backTo="/creator/campaigns"
+        backLabel="Back to campaigns"
+      />
+    )
+  }
+
+  if (campaign && (campaign.status === "draft" || campaign.status === "pending_budget")) {
+    navigate(`/creator/campaigns/${campaign.id}/edit`, { replace: true })
+    return null
+  }
+
+  if (!campaign) return null
 
   const remaining = campaign.totalBudget - campaign.budgetSpent
   const pct = campaign.totalBudget
     ? Math.round((campaign.budgetSpent / campaign.totalBudget) * 100)
     : 0
-  const escrowAvailable = remaining * 0.6
-  const escrowLocked = remaining * 0.4
 
-  const transactions = campaignTransactions[campaign.id] ?? []
-
-  const handleAddFunds = () => {
-    toast.success("Funds added", {
-      description: `${formatCurrency(parseFloat(amount) || 0)} added to ${campaign.title} budget.`,
-    })
-    setAddFundsOpen(false)
-    setAmount("")
-  }
-
-  const handleToggleBudget = (checked: boolean) => {
-    setBudgetActive(checked)
-    toast.success(checked ? "Budget resumed" : "Budget paused", {
-      description: checked
-        ? "Clippers can earn rewards again."
-        : "No new payouts will be released until resumed.",
-    })
+  const handleAddFunds = async () => {
+    if (!id) return
+    try {
+      await fundMutation.mutateAsync({ id, amount: parseFloat(amount) || 0 })
+      toast.success("Funds added", {
+        description: `${formatCurrency(parseFloat(amount) || 0)} added to ${campaign?.title ?? ""} budget.`,
+      })
+      await refresh()
+      setAddFundsOpen(false)
+      setAmount("")
+    } catch {
+      toast.error("Failed to add funds")
+    }
   }
 
   return (
@@ -125,13 +194,19 @@ export function CampaignBudgetPage() {
         </Button>
       </div>
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Budget management
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {campaign.title} — track spend, add funds, and manage escrow.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Budget management
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {campaign.title} — track spend and manage escrow.
+          </p>
+        </div>
+        <Button onClick={() => setAddFundsOpen(true)}>
+          <Plus className="size-4" weight="bold" />
+          Add funds
+        </Button>
       </div>
 
       {/* Stats row */}
@@ -175,87 +250,6 @@ export function CampaignBudgetPage() {
         </Card>
       </div>
 
-      {/* Escrow card + actions */}
-      <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Card className="border-border/60 bg-card/70 backdrop-blur">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Vault className="size-4 text-primary" weight="fill" />
-              Escrow status
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-border/60 bg-background/50 p-4">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Available for payouts
-                </p>
-                <p className="mt-1 text-xl font-semibold tabular-nums text-success">
-                  {formatCurrency(escrowAvailable)}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Ready to release to clippers
-                </p>
-              </div>
-              <div className="rounded-lg border border-border/60 bg-background/50 p-4">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Locked in escrow
-                </p>
-                <p className="mt-1 text-xl font-semibold tabular-nums">
-                  {formatCurrency(escrowLocked)}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Pending 30-day view verification
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <Button className="w-full" onClick={() => setAddFundsOpen(true)}>
-            <Plus className="size-4" weight="bold" />
-            Add funds
-          </Button>
-
-          <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">
-                  {budgetActive ? "Budget active" : "Budget paused"}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {budgetActive
-                    ? "Clippers earn rewards on verified views."
-                    : "No new payouts until resumed."}
-                </p>
-              </div>
-              <Switch
-                checked={budgetActive}
-                onCheckedChange={handleToggleBudget}
-              />
-            </div>
-            <div className="mt-3 flex items-center gap-1.5">
-              {budgetActive ? (
-                <Badge
-                  variant="outline"
-                  className="border-success/40 bg-success/10 text-success"
-                >
-                  <Lightning weight="fill" className="size-3" /> Active
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="border-warning/40 bg-warning/10 text-warning"
-                >
-                  <PauseCircle weight="fill" className="size-3" /> Paused
-                </Badge>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-
       {/* Transaction history */}
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardHeader>
@@ -293,7 +287,12 @@ export function CampaignBudgetPage() {
                     <p className="truncate text-sm font-medium">
                       {tx.description}
                     </p>
-                    <p className="text-xs text-muted-foreground">{tx.at}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(tx.at).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <span
@@ -328,7 +327,12 @@ export function CampaignBudgetPage() {
       </Card>
 
       {/* Add funds dialog */}
-      <Dialog open={addFundsOpen} onOpenChange={setAddFundsOpen}>
+      <Dialog
+        open={addFundsOpen}
+        onOpenChange={(open) => {
+          if (!fundMutation.isPending) setAddFundsOpen(open)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add funds to campaign</DialogTitle>
@@ -361,11 +365,16 @@ export function CampaignBudgetPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setAddFundsOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={fundMutation.isPending}
+              onClick={() => setAddFundsOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               disabled={!amount || parseFloat(amount) <= 0}
+              loading={fundMutation.isPending}
               onClick={handleAddFunds}
             >
               Add {amount ? formatCurrency(parseFloat(amount)) : "funds"}

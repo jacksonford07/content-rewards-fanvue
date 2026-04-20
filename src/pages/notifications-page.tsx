@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   Bell,
@@ -13,9 +14,16 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/page-header"
-import { notifications, timeAgo } from "@/lib/mock-data"
-import type { Notification } from "@/lib/mock-data"
+import { PaginationBar } from "@/components/pagination-bar"
+import { timeAgo } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  useNotifications,
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  type Notification,
+} from "@/queries/notifications"
 
 const iconMap: Record<
   Notification["type"],
@@ -44,10 +52,50 @@ const iconMap: Record<
     icon: WarningCircle,
     className: "border-warning/30 bg-warning/10 text-warning",
   },
+  views_ready: {
+    icon: CheckCircle,
+    className: "border-primary/30 bg-primary/10 text-primary",
+  },
+}
+
+function resolveActionUrl(n: Notification): string {
+  // If the stored URL already carries a tab or points somewhere specific, keep it
+  if (n.actionUrl && n.actionUrl.includes("?")) return n.actionUrl
+  switch (n.type) {
+    case "approved":
+      return "/submissions?tab=approved"
+    case "rejected":
+      return "/submissions?tab=rejected"
+    case "new_submission":
+      return "/creator/inbox?tab=pending"
+    case "payout_released":
+      return "/wallet"
+    default:
+      return n.actionUrl ?? "#"
+  }
 }
 
 export function NotificationsPage() {
-  const unread = notifications.filter((n) => !n.read).length
+  const [page, setPage] = useState(1)
+  const limit = 20
+  const { data, isLoading: loading } = useNotifications({ page, limit })
+  const notifications: Notification[] = data?.notifications ?? []
+  const unread = data?.unreadCount ?? 0
+  const meta = data?.meta
+
+  const markAllReadMutation = useMarkAllNotificationsRead()
+  const markReadMutation = useMarkNotificationRead()
+
+  // Auto mark all as read when the user opens the notifications page
+  useEffect(() => {
+    if (!loading && unread > 0) {
+      markAllReadMutation.mutate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
+  const markAllRead = () => markAllReadMutation.mutate()
+  const markRead = (id: string) => markReadMutation.mutate(id)
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6 md:py-8">
@@ -55,7 +103,7 @@ export function NotificationsPage() {
         title="Notifications"
         description={`${unread} unread · activity across your campaigns and submissions.`}
         actions={
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={markAllRead}>
             Mark all read
           </Button>
         }
@@ -64,7 +112,18 @@ export function NotificationsPage() {
 
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardContent className="divide-y divide-border/50 p-0">
-          {notifications.length === 0 ? (
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-3 p-4">
+                <Skeleton className="size-9 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-1/2" />
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+            ))
+          ) : notifications.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-12 text-center">
               <Bell className="size-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
@@ -77,7 +136,8 @@ export function NotificationsPage() {
               return (
                 <Link
                   key={n.id}
-                  to={n.actionUrl ?? "#"}
+                  to={resolveActionUrl(n)}
+                  onClick={() => { if (!n.read) markRead(n.id) }}
                   className={cn(
                     "group flex items-start gap-3 p-4 transition-colors hover:bg-muted/40 md:gap-4 md:p-5",
                     !n.read && "bg-primary/[0.03]"
@@ -122,6 +182,16 @@ export function NotificationsPage() {
           )}
         </CardContent>
       </Card>
+
+      {meta && (
+        <PaginationBar
+          page={meta.page}
+          limit={meta.limit}
+          totalItems={meta.totalItems}
+          totalPages={meta.totalPages}
+          onPageChange={setPage}
+        />
+      )}
     </div>
   )
 }

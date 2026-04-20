@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import {
   ArrowSquareOut,
   Clock,
@@ -8,6 +8,7 @@ import {
   CurrencyDollar,
   Eye,
   Timer,
+  Prohibit,
 } from "@phosphor-icons/react"
 
 import {
@@ -19,20 +20,25 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/page-header"
 import { PlatformIcon } from "@/components/platform-icon"
 import {
-  mySubmissions,
   formatCompactNumber,
   formatCurrency,
   platformLabels,
   timeAgo,
   timeUntil,
 } from "@/lib/mock-data"
+import {
+  useMySubmissions,
+  useMySubmissionsStats,
+  type MineTab,
+} from "@/queries/submissions"
+import { PaginationBar } from "@/components/pagination-bar"
 import type { Submission, SubmissionStatus } from "@/lib/types"
 
-type FilterKey = "all" | "pending" | "approved" | "paid" | "rejected"
+type FilterKey = MineTab
 
 const tabs: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
@@ -40,15 +46,66 @@ const tabs: { key: FilterKey; label: string }[] = [
   { key: "approved", label: "Approved" },
   { key: "paid", label: "Paid" },
   { key: "rejected", label: "Rejected" },
+  { key: "banned", label: "Banned" },
 ]
 
-export function MySubmissionsPage() {
-  const [filter, setFilter] = useState<FilterKey>("all")
+const validTabs: FilterKey[] = ["all", "pending", "approved", "paid", "rejected", "banned"]
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return mySubmissions
-    return mySubmissions.filter((s) => s.status === filter)
-  }, [filter])
+export function MySubmissionsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialTab = (searchParams.get("tab") as FilterKey) || "all"
+  const [filter, setFilter] = useState<FilterKey>(
+    validTabs.includes(initialTab) ? initialTab : "all",
+  )
+
+  // Sync filter state when URL tab changes (e.g. notification click)
+  useEffect(() => {
+    const urlTab = searchParams.get("tab") as FilterKey | null
+    if (urlTab && validTabs.includes(urlTab) && urlTab !== filter) {
+      setFilter(urlTab)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // Per-tab independent page state
+  const [pages, setPages] = useState<Record<FilterKey, number>>({
+    all: 1,
+    pending: 1,
+    approved: 1,
+    paid: 1,
+    rejected: 1,
+    banned: 1,
+  })
+  const page = pages[filter]
+  const setPage = (p: number) => setPages((prev) => ({ ...prev, [filter]: p }))
+  const limit = 20
+
+  const { data: stats } = useMySubmissionsStats()
+  const { data: resp, isLoading: loading } = useMySubmissions({
+    tab: filter,
+    page,
+    limit,
+  })
+  const filtered: Submission[] = resp?.data ?? []
+  const meta = resp?.meta
+
+  const counts: Record<FilterKey, number> = {
+    all: stats?.all ?? 0,
+    pending: stats?.pending ?? 0,
+    approved: stats?.approved ?? 0,
+    paid: stats?.paid ?? 0,
+    rejected: stats?.rejected ?? 0,
+    banned: stats?.banned ?? 0,
+  }
+
+  const handleTabChange = (v: string) => {
+    const key = v as FilterKey
+    setFilter(key)
+    const next = new URLSearchParams(searchParams)
+    if (key === "all") next.delete("tab")
+    else next.set("tab", key)
+    setSearchParams(next, { replace: true })
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
@@ -60,19 +117,40 @@ export function MySubmissionsPage() {
 
       <Tabs
         value={filter}
-        onValueChange={(v) => setFilter(v as FilterKey)}
+        onValueChange={handleTabChange}
         className="mb-6"
       >
-        <TabsList>
-          {tabs.map((t) => (
-            <TabsTrigger key={t.key} value={t.key}>
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <TabsList>
+            {tabs.map((t) => (
+              <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
+                {t.label}
+                {counts[t.key] > 0 && (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">{counts[t.key]}</span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         <TabsContent value={filter} className="mt-6 space-y-3">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i} className="border-border/60 bg-card/70">
+                  <CardContent className="flex items-center gap-4 p-4">
+                    <Skeleton className="size-16 shrink-0 rounded-lg" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-3 w-1/3" />
+                      <Skeleton className="h-3 w-1/4" />
+                    </div>
+                    <Skeleton className="h-6 w-20" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
             <Card className="p-12 text-center">
               <p className="text-sm text-muted-foreground">
                 No submissions in this category yet.
@@ -83,11 +161,32 @@ export function MySubmissionsPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {meta && (
+        <PaginationBar
+          page={meta.page}
+          limit={meta.limit}
+          totalItems={meta.totalItems}
+          totalPages={meta.totalPages}
+          onPageChange={setPage}
+        />
+      )}
     </div>
   )
 }
 
-function StatusBadge({ status }: { status: SubmissionStatus }) {
+function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?: boolean }) {
+  if (isBanned) {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1.5 border-destructive/40 bg-destructive/10 text-destructive"
+      >
+        <Prohibit className="size-3" weight="bold" />
+        Banned from campaign
+      </Badge>
+    )
+  }
   const map: Record<
     SubmissionStatus,
     { label: string; className: string; icon: React.ReactNode }
@@ -116,11 +215,6 @@ function StatusBadge({ status }: { status: SubmissionStatus }) {
       label: "Rejected",
       className: "border-destructive/40 bg-destructive/10 text-destructive",
       icon: <XCircle className="size-3" weight="fill" />,
-    },
-    flagged: {
-      label: "Flagged",
-      className: "border-warning/40 bg-warning/10 text-warning",
-      icon: <Clock className="size-3" weight="fill" />,
     },
   }
   const s = map[status]
@@ -165,7 +259,7 @@ function SubmissionRow({ submission }: { submission: Submission }) {
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <StatusBadge status={submission.status} />
+            <StatusBadge status={submission.status} isBanned={submission.isBanned} />
             {submission.status === "pending" && submission.autoApproveAt && (
               <Badge
                 variant="outline"
@@ -181,30 +275,33 @@ function SubmissionRow({ submission }: { submission: Submission }) {
                 className="gap-1.5 border-border/70 text-muted-foreground"
               >
                 <Timer className="size-3" />
-                View lock in {timeUntil(submission.lockDate)}
+                View lock in {timeUntil(submission.lockDate, true)}
               </Badge>
             )}
           </div>
 
           {submission.status === "rejected" && submission.rejectionReason && (
-            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive">
-              <span className="font-medium">Reason:</span>{" "}
+            <div className="mt-2 w-fit max-w-full rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+              <span className="font-medium">
+                {submission.isBanned ? "Banned — reason:" : "Reason:"}
+              </span>{" "}
               {submission.rejectionReason}
             </div>
           )}
         </div>
 
-        <Separator orientation="vertical" className="hidden h-16 md:block" />
 
         {/* Metrics */}
         <div className="flex items-center gap-4 text-sm md:flex-col md:items-end md:gap-1">
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Eye className="size-3.5" />
-            <span className="tabular-nums">
-              {formatCompactNumber(submission.viewsCurrent)}
-            </span>
-            <span className="text-[11px]">views</span>
-          </div>
+          {submission.viewsAtDay30 != null && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Eye className="size-3.5" />
+              <span className="tabular-nums">
+                {formatCompactNumber(submission.viewsAtDay30)}
+              </span>
+              <span className="text-[11px]">views</span>
+            </div>
+          )}
           {submission.status === "paid" && submission.payoutAmount && (
             <div className="text-lg font-semibold tabular-nums text-primary">
               +{formatCurrency(submission.payoutAmount)}
