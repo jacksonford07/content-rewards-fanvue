@@ -103,6 +103,97 @@ export function useCampaign(id: string | undefined, options?: TQueryOptions<Camp
   })
 }
 
+export function useCampaignBySlug(
+  slug: string | undefined,
+  options?: TQueryOptions<Campaign>,
+) {
+  return useQuery({
+    queryKey: ["campaigns.bySlug", slug] as const,
+    queryFn: async () => {
+      const res = await api.get<Campaign>(`/campaigns/by-slug/${slug}`)
+      return res.data
+    },
+    enabled: !!slug,
+    ...options,
+  })
+}
+
+export function useCampaignSourceStatus(
+  id: string | undefined,
+  options?: TQueryOptions<{ available: boolean }>,
+) {
+  return useQuery({
+    queryKey: ["campaigns.sourceStatus", id] as const,
+    queryFn: async () => {
+      const res = await api.get<{ available: boolean }>(
+        `/campaigns/${id}/source-status`,
+      )
+      return res.data
+    },
+    enabled: !!id,
+    // Back off gracefully; backend already caches 5 min.
+    staleTime: 60_000,
+    ...options,
+  })
+}
+
+export interface TopCampaign {
+  id: string
+  title: string
+  sourceThumbnailUrl: string | null
+  rewardRatePer1k: number
+  totalViews: number
+  totalSubmissions: number
+  creator: {
+    id: string
+    name: string
+    handle: string
+    avatarUrl: string
+  } | null
+}
+
+export function useTopCampaigns(
+  limit = 8,
+  options?: TQueryOptions<TopCampaign[]>,
+) {
+  return useQuery({
+    queryKey: ["campaigns.top", limit] as const,
+    queryFn: async () => {
+      const res = await api.get<TopCampaign[]>(
+        `/campaigns/top?limit=${limit}`,
+      )
+      return res.data
+    },
+    ...options,
+  })
+}
+
+export interface TopClipper {
+  id: string
+  name: string
+  handle: string
+  avatarUrl: string
+  earnings: number
+  totalViews: number
+  submissionCount: number
+}
+
+export function useTopClippers(
+  limit = 8,
+  options?: TQueryOptions<TopClipper[]>,
+) {
+  return useQuery({
+    queryKey: ["campaigns.topClippers", limit] as const,
+    queryFn: async () => {
+      const res = await api.get<TopClipper[]>(
+        `/campaigns/top-clippers?limit=${limit}`,
+      )
+      return res.data
+    },
+    ...options,
+  })
+}
+
 interface CampaignTransaction {
   id: string
   type: string

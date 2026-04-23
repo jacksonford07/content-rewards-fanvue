@@ -18,6 +18,10 @@ import {
   Trash,
   MagnifyingGlass,
   SlidersHorizontal,
+  Lock,
+  Globe,
+  LinkSimple,
+  Trophy,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -71,7 +75,15 @@ import {
   useMyCampaigns,
   useMyCampaignsStats,
   usePauseCampaign,
+  useTopClippers,
 } from "@/queries/campaigns"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { TopClippersWidget } from "@/components/top-clippers-widget"
 import { PaginationBar } from "@/components/pagination-bar"
 import type { Campaign } from "@/lib/types"
 
@@ -204,14 +216,20 @@ export function CreatorCampaignsPage() {
         className="mb-6"
       />
 
+      <TopClippersChipBlock />
+
       {/* Quick stats (computed server-side, independent of filters) */}
       {statsLoading ? (
         <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="border-border/60 bg-card/70 p-4">
-              <Skeleton className="size-8 rounded-lg" />
-              <Skeleton className="mt-3 h-3 w-20" />
-              <Skeleton className="mt-2 h-7 w-16" />
+            <Card key={i} className="border-border/60 bg-card/70 p-3.5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="size-9 shrink-0 rounded-lg" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-2.5 w-20" />
+                  <Skeleton className="h-6 w-16" />
+                </div>
+              </div>
             </Card>
           ))}
         </div>
@@ -383,6 +401,19 @@ export function CreatorCampaignsPage() {
             const pct = c.totalBudget
               ? Math.round((c.budgetSpent / c.totalBudget) * 100)
               : 0
+            const isPreviewable =
+              c.status !== "draft" && c.status !== "pending_budget"
+            const ThumbWrap = ({ children }: { children: React.ReactNode }) =>
+              isPreviewable ? (
+                <Link
+                  to={`/campaigns/${c.id}`}
+                  className="shrink-0 md:h-24 md:w-40"
+                >
+                  {children}
+                </Link>
+              ) : (
+                <div className="shrink-0 md:h-24 md:w-40">{children}</div>
+              )
             return (
               <Card
                 key={c.id}
@@ -390,21 +421,25 @@ export function CreatorCampaignsPage() {
               >
                 <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:p-5">
                   {c.sourceThumbnailUrl ? (
-                    <img
-                      src={c.sourceThumbnailUrl}
-                      alt={c.title}
-                      className="aspect-video w-full shrink-0 rounded-lg object-cover md:h-24 md:w-40"
-                      referrerPolicy="no-referrer"
-                    />
+                    <ThumbWrap>
+                      <img
+                        src={c.sourceThumbnailUrl}
+                        alt={c.title}
+                        className="aspect-video w-full rounded-lg object-cover md:h-24 md:w-40"
+                        referrerPolicy="no-referrer"
+                      />
+                    </ThumbWrap>
                   ) : (
-                    <div className="flex aspect-video w-full shrink-0 items-center justify-center rounded-lg bg-muted md:h-24 md:w-40">
-                      <FilmSlate className="size-8 text-muted-foreground/50" />
-                    </div>
+                    <ThumbWrap>
+                      <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-muted md:h-24 md:w-40">
+                        <FilmSlate className="size-8 text-muted-foreground/50" />
+                      </div>
+                    </ThumbWrap>
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-center gap-2">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
                           <Badge
                             variant="outline"
                             className={
@@ -429,10 +464,35 @@ export function CreatorCampaignsPage() {
                               ? "Awaiting budget"
                               : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
                           </Badge>
+                          {c.isPrivate ? (
+                            <Badge
+                              variant="outline"
+                              className="border-primary/40 bg-primary/10 text-primary"
+                            >
+                              <Lock weight="fill" className="size-3" />
+                              Private
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="border-border/70 bg-muted/50 text-muted-foreground"
+                            >
+                              <Globe weight="fill" className="size-3" />
+                              Public
+                            </Badge>
+                          )}
                         </div>
-                        <h3 className="truncate text-base font-semibold">
-                          {c.title}
-                        </h3>
+                        {isPreviewable ? (
+                          <Link to={`/campaigns/${c.id}`} className="block">
+                            <h3 className="truncate text-base font-semibold hover:text-primary">
+                              {c.title}
+                            </h3>
+                          </Link>
+                        ) : (
+                          <h3 className="truncate text-base font-semibold">
+                            {c.title}
+                          </h3>
+                        )}
                         <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
                           {c.description}
                         </p>
@@ -445,6 +505,30 @@ export function CreatorCampaignsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {isPreviewable && (
+                            <DropdownMenuItem asChild>
+                              <Link to={`/campaigns/${c.id}`}>
+                                <Eye className="size-4" />
+                                View details
+                              </Link>
+                            </DropdownMenuItem>
+                          )}
+                          {c.isPrivate && c.privateSlug && (
+                            <DropdownMenuItem
+                              onClick={async () => {
+                                const url = `${window.location.origin}/c/${c.privateSlug}`
+                                try {
+                                  await navigator.clipboard.writeText(url)
+                                  toast.success("Invite link copied")
+                                } catch {
+                                  toast.error("Failed to copy link")
+                                }
+                              }}
+                            >
+                              <LinkSimple className="size-4" />
+                              Copy invite link
+                            </DropdownMenuItem>
+                          )}
                           {c.status !== "draft" && c.status !== "pending_budget" && (
                             <DropdownMenuItem asChild>
                               <Link to={`/creator/inbox?campaign=${c.id}`}>
@@ -630,24 +714,28 @@ function DashStat({
     primary: "border-primary/30 bg-primary/5 text-primary",
   }
   return (
-    <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
-      <div className="flex items-center justify-between">
+    <Card className="border-border/60 bg-card/70 p-3.5 backdrop-blur">
+      <div className="flex items-center gap-3">
         <div
-          className={`inline-flex size-8 items-center justify-center rounded-lg border ${
+          className={`inline-flex size-9 shrink-0 items-center justify-center rounded-lg border ${
             accent ? accentClasses[accent] : "border-border bg-muted"
           }`}
         >
           {icon}
         </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </p>
+          <p className="truncate text-xl font-semibold leading-tight tabular-nums">
+            {value}
+          </p>
+        </div>
         <TrendUp
           weight="bold"
-          className="size-4 text-success opacity-80"
+          className="size-4 shrink-0 text-success opacity-80"
         />
       </div>
-      <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
     </Card>
   )
 }
@@ -659,6 +747,89 @@ function MiniStat({ label, value }: { label: string; value: string }) {
         {label}
       </p>
       <p className="text-sm font-semibold tabular-nums">{value}</p>
+    </div>
+  )
+}
+
+function TopClippersChipBlock() {
+  const { data: clippers, isLoading } = useTopClippers(20)
+  const all = clippers ?? []
+  const mobilePreview = all.slice(0, 3)
+  const desktopPreview = all.slice(0, 5)
+  const remainingMobile = Math.max(0, all.length - mobilePreview.length)
+  const remainingDesktop = Math.max(0, all.length - desktopPreview.length)
+
+  if (!isLoading && all.length === 0) return null
+
+  return (
+    <div className="mb-6">
+      <Popover>
+        <PopoverTrigger asChild>
+          <button className="group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-card/70 px-4 py-2.5 text-left backdrop-blur transition-colors hover:border-primary/40 hover:bg-card">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Trophy weight="fill" className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">Top clippers</p>
+              <p className="text-xs text-muted-foreground">
+                {isLoading
+                  ? "Loading…"
+                  : `Best performing clippers by earnings · click to view all`}
+              </p>
+            </div>
+            {all.length > 0 && (
+              <>
+                <div className="flex -space-x-2 sm:hidden">
+                  {mobilePreview.map((c) => (
+                    <Avatar key={c.id} className="size-7 ring-2 ring-card">
+                      <AvatarImage src={c.avatarUrl} />
+                      <AvatarFallback className="text-[10px]">
+                        {c.name.charAt(0)}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {remainingMobile > 0 && (
+                    <div className="flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-card tabular-nums">
+                      +{remainingMobile}
+                    </div>
+                  )}
+                </div>
+                <div className="hidden -space-x-2 sm:flex">
+                  {desktopPreview.map((c) => (
+                    <Avatar key={c.id} className="size-7 ring-2 ring-card">
+                      <AvatarImage src={c.avatarUrl} />
+                      <AvatarFallback className="text-[10px]">
+                        {c.name.charAt(0)}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {remainingDesktop > 0 && (
+                    <div className="flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-card tabular-nums">
+                      +{remainingDesktop}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className="w-[340px] gap-0 overflow-hidden border border-white/15 bg-card p-0"
+        >
+          <div className="flex items-center gap-2 border-b border-border/40 bg-card px-6 py-3 text-sm font-medium">
+            <Trophy className="size-4 text-primary" weight="fill" />
+            Top clippers
+          </div>
+          <div className="max-h-[380px] overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TopClippersWidget
+              limit={20}
+              showHeader={false}
+              className="rounded-none border-0 bg-transparent shadow-none ring-0 backdrop-blur-0"
+            />
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }

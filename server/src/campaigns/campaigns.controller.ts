@@ -62,6 +62,36 @@ export class CampaignsController {
     });
   }
 
+  @Get("top")
+  top(
+    @Req() req: { user: { id: string } },
+    @Query("limit") limit?: string,
+  ) {
+    return this.campaignsService.topCampaigns(
+      limit ? parseInt(limit, 10) : 10,
+      req.user.id,
+    );
+  }
+
+  @Get("top-clippers")
+  topClippers(@Query("limit") limit?: string) {
+    return this.campaignsService.topClippers(
+      limit ? parseInt(limit, 10) : 10,
+    );
+  }
+
+  @Public()
+  @Get("by-slug/:slug")
+  getBySlug(@Param("slug") slug: string) {
+    return this.campaignsService.getBySlug(slug);
+  }
+
+  @Public()
+  @Get(":id/source-status")
+  sourceStatus(@Param("id") id: string) {
+    return this.campaignsService.sourceStatus(id);
+  }
+
   @Public()
   @Get(":id")
   getById(@Param("id") id: string) {
@@ -86,6 +116,7 @@ export class CampaignsController {
       minPayoutThreshold?: number;
       maxPayoutPerClip?: number;
       status?: string;
+      isPrivate?: boolean;
     },
   ) {
     return this.campaignsService.create(req.user.id, body);

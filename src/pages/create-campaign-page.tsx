@@ -16,6 +16,8 @@ import {
   Info,
   ArrowCircleUp,
   FloppyDisk,
+  Lock,
+  Copy,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -118,6 +120,9 @@ export function CreateCampaignPage() {
   const [topupAmount, setTopupAmount] = useState("")
   const [draftId, setDraftId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [savingAction, setSavingAction] = useState<
+    null | "draft" | "pending" | "publish"
+  >(null)
   const [leaveOpen, setLeaveOpen] = useState(false)
   const [initialSnapshot, setInitialSnapshot] = useState("")
 
@@ -136,7 +141,10 @@ export function CreateCampaignPage() {
     totalBudget: "1000",
     minThreshold: "2000",
     maxPerClip: "",
+    isPrivate: false,
   }))
+  const [shareLink, setShareLink] = useState<string | null>(null)
+  const [shareCopied, setShareCopied] = useState(false)
 
   useEffect(() => {
     if (!id) {
@@ -160,6 +168,7 @@ export function CreateCampaignPage() {
         totalBudget: c.totalBudget.toString(),
         minThreshold: c.minPayoutThreshold.toString(),
         maxPerClip: c.maxPayoutPerClip ? c.maxPayoutPerClip.toString() : "",
+        isPrivate: c.isPrivate === true,
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -284,6 +293,7 @@ export function CreateCampaignPage() {
       totalBudget: parseFloat(state.totalBudget) || 0,
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
       maxPayoutPerClip: state.maxPerClip ? parseFloat(state.maxPerClip) : undefined,
+      isPrivate: state.isPrivate,
     }
   }
 
@@ -302,6 +312,7 @@ export function CreateCampaignPage() {
   const handleSaveDraft = async () => {
     if (!validateRewards()) return
     setSaving(true)
+    setSavingAction("draft")
     try {
       await saveCampaign("draft")
       toast.success("Draft saved")
@@ -309,11 +320,13 @@ export function CreateCampaignPage() {
       toast.error("Failed to save draft")
     }
     setSaving(false)
+    setSavingAction(null)
   }
 
   const handleSaveAsPending = async () => {
     if (!validateRewards()) return
     setSaving(true)
+    setSavingAction("pending")
     try {
       await saveCampaign("pending_budget")
       toast.success("Campaign saved", {
@@ -324,11 +337,13 @@ export function CreateCampaignPage() {
       toast.error("Failed to save campaign")
     }
     setSaving(false)
+    setSavingAction(null)
   }
 
   const handlePublish = async () => {
     if (!validateRewards()) return
     setSaving(true)
+    setSavingAction("publish")
     try {
       const cid = await saveCampaign("pending_budget")
       await fundMutation.mutateAsync({
@@ -336,6 +351,16 @@ export function CreateCampaignPage() {
         amount: parseFloat(state.totalBudget),
       })
       await refresh()
+      if (state.isPrivate) {
+        // Fetch the created campaign to get its slug
+        const res = await api.get<Campaign>(`/campaigns/${cid}`)
+        if (res.data.privateSlug) {
+          setShareLink(`${window.location.origin}/c/${res.data.privateSlug}`)
+          setSaving(false)
+          setSavingAction(null)
+          return
+        }
+      }
       toast.success("Campaign created and funded", {
         description: `${state.title} is now live in the hub.`,
       })
@@ -351,6 +376,7 @@ export function CreateCampaignPage() {
       }
     }
     setSaving(false)
+    setSavingAction(null)
   }
 
   if (loadError) {
@@ -785,6 +811,29 @@ export function CreateCampaignPage() {
                 </div>
               </Card>
 
+              <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <Checkbox
+                    checked={state.isPrivate}
+                    onCheckedChange={(v) => update("isPrivate", Boolean(v))}
+                    className="mt-0.5 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <Lock className="size-4 text-primary" weight="fill" />
+                      <span className="text-sm font-medium">
+                        Make this campaign private
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Hide from the public hub. You'll get a shareable link to
+                      invite specific clippers — only people with the link can
+                      view and submit.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
               <label className="flex items-start gap-2.5 text-xs text-muted-foreground">
                 <Checkbox defaultChecked className="mt-0.5" />
                 <span>
@@ -815,14 +864,15 @@ export function CreateCampaignPage() {
             <>
               <Button
                 variant="outline"
-                loading={saving}
+                loading={savingAction === "draft" || savingAction === "pending"}
+                disabled={saving && savingAction !== "draft" && savingAction !== "pending"}
                 onClick={step >= 5 ? handleSaveAsPending : handleSaveDraft}
               >
                 <FloppyDisk className="size-4" />
                 Save draft
               </Button>
               <Button
-                disabled={!canNext}
+                disabled={!canNext || saving}
                 onClick={() => {
                   if (step === 5 && !validateRewards()) return
                   setStep((s) => s + 1)
@@ -836,7 +886,8 @@ export function CreateCampaignPage() {
             <>
               <Button
                 variant="outline"
-                loading={saving}
+                loading={savingAction === "pending"}
+                disabled={saving && savingAction !== "pending"}
                 onClick={handleSaveAsPending}
               >
                 <FloppyDisk className="size-4" />
@@ -846,8 +897,12 @@ export function CreateCampaignPage() {
                 const insufficientBalance = (user?.walletBalance ?? 0) < budgetNum
                 const btn = (
                   <Button
-                    disabled={!canNext || insufficientBalance}
-                    loading={saving}
+                    disabled={
+                      !canNext ||
+                      insufficientBalance ||
+                      (saving && savingAction !== "publish")
+                    }
+                    loading={savingAction === "publish"}
                     onClick={handlePublish}
                   >
                     <Sparkle weight="fill" className="size-4" />
@@ -937,6 +992,70 @@ export function CreateCampaignPage() {
               loading={topupMutation.isPending}
             >
               Confirm payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!shareLink}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShareLink(null)
+            setShareCopied(false)
+            navigate("/creator/campaigns")
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock weight="fill" className="size-5 text-primary" />
+              Private campaign created
+            </DialogTitle>
+            <DialogDescription>
+              Share this link with clippers you want to invite. Only people with
+              the link can view the campaign and submit clips.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <Input readOnly value={shareLink ?? ""} className="font-mono text-xs" />
+            <Button
+              variant="outline"
+              size="default"
+              onClick={async () => {
+                if (!shareLink) return
+                try {
+                  await navigator.clipboard.writeText(shareLink)
+                  setShareCopied(true)
+                  toast.success("Link copied to clipboard")
+                } catch {
+                  toast.error("Failed to copy link")
+                }
+              }}
+            >
+              {shareCopied ? (
+                <>
+                  <Check className="size-4" weight="bold" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="size-4" />
+                  Copy
+                </>
+              )}
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setShareLink(null)
+                setShareCopied(false)
+                navigate("/creator/campaigns")
+              }}
+            >
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

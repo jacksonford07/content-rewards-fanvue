@@ -18,6 +18,10 @@ import {
   XCircle,
   ListChecks,
   Prohibit,
+  Lock,
+  Copy,
+  Check,
+  VideoCamera,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -67,20 +71,23 @@ import {
   timeAgo,
   timeUntil,
 } from "@/lib/mock-data"
-import { useCampaign } from "@/queries/campaigns"
+import { useCampaign, useCampaignSourceStatus } from "@/queries/campaigns"
 import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
 import { QK } from "@/lib/query-keys"
 import { NotFoundCard } from "@/components/not-found-card"
+import { useAuth } from "@/hooks/use-auth"
 import type { Platform } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export function CampaignDetailPage() {
   const { id } = useParams()
   const qc = useQueryClient()
+  const { user } = useAuth()
   const [submitOpen, setSubmitOpen] = useState(false)
   const [postUrl, setPostUrl] = useState("")
   const [platform, setPlatform] = useState<Platform | "">("")
   const [acked, setAcked] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const { data: campaign, isError: campaignError } = useCampaign(id)
   const { data: myResp } = useMySubmissions({
@@ -136,6 +143,14 @@ export function CampaignDetailPage() {
     return match?.[1] ?? null
   }, [campaign?.sourceContentUrl])
 
+  // Backend probes the Drive file (HEAD + cached 5 min) so the UI can swap
+  // the embed/download CTA for a helpful placeholder when the source was
+  // removed or had its permissions revoked.
+  const { data: sourceStatus, isLoading: sourceStatusLoading } =
+    useCampaignSourceStatus(campaign?.id)
+  const sourceMissing = sourceStatus?.available === false
+  const sourceChecking = sourceStatusLoading || sourceStatus === undefined
+
   if (campaignError) {
     return (
       <NotFoundCard
@@ -148,39 +163,138 @@ export function CampaignDetailPage() {
   }
 
   if (!campaign) return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6 md:py-8">
-      <Skeleton className="h-4 w-48 mb-6" />
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-2/3" />
-        <Skeleton className="h-4 w-1/2" />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border/60 bg-card/70 p-4 space-y-2">
-              <Skeleton className="h-3 w-16" />
-              <Skeleton className="h-6 w-20" />
-            </div>
-          ))}
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
+      {/* Breadcrumb + Back */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-10" />
+          <span className="text-muted-foreground">/</span>
+          <Skeleton className="h-4 w-40" />
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
-              <Skeleton className="h-5 w-24" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-2/3" />
+        <Skeleton className="h-8 w-20" />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+        {/* Main column */}
+        <div className="min-w-0 space-y-6">
+          {/* Hero video card */}
+          <Card className="overflow-hidden border-border/60 bg-card/70 p-0 backdrop-blur">
+            <Skeleton className="aspect-video w-full rounded-none" />
+          </Card>
+
+          {/* Title + status */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-8 w-2/3" />
+              <Skeleton className="h-6 w-14 rounded-full" />
             </div>
-            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-3/4" />
-            </div>
+            <Skeleton className="h-4 w-4/5" />
           </div>
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border/60 bg-card/70 p-6 space-y-3">
-              <Skeleton className="h-5 w-28" />
-              <Skeleton className="aspect-video w-full rounded-lg" />
-            </div>
-          </div>
+
+          {/* Creator row */}
+          <Card className="border-border/60 bg-card/70 backdrop-blur">
+            <CardContent className="flex items-center gap-3 p-4">
+              <Skeleton className="size-11 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-3 w-28" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Requirements card */}
+          <Card className="border-border/60 bg-card/70 backdrop-blur">
+            <CardHeader>
+              <Skeleton className="h-5 w-44" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2 rounded-lg border border-border/60 bg-background/50 p-4">
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-5/6" />
+                <Skeleton className="h-3 w-2/3" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-6 w-20 rounded-full" />
+                    <Skeleton className="h-6 w-20 rounded-full" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-32" />
+                  <Skeleton className="h-4 w-36" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Source content card */}
+          <Card className="border-border/60 bg-card/70 backdrop-blur">
+            <CardHeader>
+              <Skeleton className="h-5 w-36" />
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
+                <Skeleton className="h-20 w-32 shrink-0 rounded-lg" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-full max-w-sm" />
+                </div>
+                <Skeleton className="h-8 w-32" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-4">
+          <Card className="overflow-hidden border-primary/30 bg-gradient-to-br from-primary/10 via-card to-card backdrop-blur">
+            <CardContent className="space-y-4 p-6">
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-10 w-40" />
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+                <Skeleton className="h-2 w-full rounded-full" />
+                <Skeleton className="h-3 w-28" />
+              </div>
+              <Separator />
+              <div className="grid grid-cols-2 gap-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="space-y-2 rounded-lg border border-border/60 bg-background/40 p-3"
+                  >
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="h-5 w-10" />
+                  </div>
+                ))}
+              </div>
+              <Skeleton className="h-11 w-full rounded-md" />
+              <Skeleton className="mx-auto h-3 w-40" />
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/60 bg-card/70 backdrop-blur">
+            <CardContent className="space-y-3 p-5">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-3 w-44" />
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
@@ -189,7 +303,18 @@ export function CampaignDetailPage() {
   const budgetRemaining = campaign.totalBudget - campaign.budgetSpent
   const isBannedFromCampaign = myClips.some((c) => c.isBanned)
   const banReason = myClips.find((c) => c.isBanned)?.rejectionReason
-  const canSubmit = campaign.status === "active" && budgetRemaining > 0 && !isBannedFromCampaign
+  const isOwner = user?.id === campaign.creator.id
+  const viewerIsCreatorRole = user?.role === "creator"
+  const canSubmit =
+    campaign.status === "active" &&
+    budgetRemaining > 0 &&
+    !isBannedFromCampaign &&
+    !viewerIsCreatorRole &&
+    !sourceMissing &&
+    !sourceChecking
+  const shareUrl = campaign.privateSlug
+    ? `${window.location.origin}/c/${campaign.privateSlug}`
+    : null
   const budgetPct = Math.round(
     (campaign.budgetSpent / campaign.totalBudget) * 100
   )
@@ -332,13 +457,32 @@ export function CampaignDetailPage() {
                   </div>
                 </>
               ) : driveFileId ? (
-                <iframe
-                  src={`https://drive.google.com/file/d/${driveFileId}/preview`}
-                  className="h-full w-full"
-                  allow="autoplay; encrypted-media"
-                  allowFullScreen
-                  referrerPolicy="no-referrer"
-                />
+                sourceChecking ? (
+                  <div className="flex h-full w-full items-center justify-center bg-muted/40">
+                    <div className="size-8 animate-spin rounded-full border-2 border-primary/60 border-t-transparent" />
+                  </div>
+                ) : sourceMissing ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-muted/40 p-6 text-center">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <VideoCamera weight="duotone" className="size-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">Source video unavailable</p>
+                      <p className="max-w-sm text-xs text-muted-foreground">
+                        The creator removed the source file from Google Drive or changed its
+                        permissions. Ask the creator for a new link before submitting a clip.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <iframe
+                    src={`https://drive.google.com/file/d/${driveFileId}/preview`}
+                    className="h-full w-full"
+                    allow="autoplay; encrypted-media"
+                    allowFullScreen
+                    referrerPolicy="no-referrer"
+                  />
+                )
               ) : (
                 <>
                   <img
@@ -500,41 +644,73 @@ export function CampaignDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
-                  <img
-                    src={campaign.sourceThumbnailUrl}
-                    alt="Source thumbnail"
-                    className="h-20 w-32 shrink-0 rounded-lg object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">
-                      Original video hosted on Google Drive
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {campaign.sourceContentUrl}
-                    </p>
+                {sourceChecking ? (
+                  <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
+                    <Skeleton className="h-20 w-32 shrink-0 rounded-lg" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-full max-w-sm" />
+                    </div>
+                    <Skeleton className="h-8 w-32" />
                   </div>
-                  <Button size="sm" asChild>
-                    <a
-                      href={campaign.sourceContentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Download source
-                      <CloudArrowDown className="size-4" />
-                    </a>
-                  </Button>
-                </div>
-                <Alert className="mt-4 border-warning/30 bg-warning/10">
-                  <Info className="size-4 text-warning" />
-                  <AlertTitle className="text-warning">Heads up</AlertTitle>
-                  <AlertDescription>
-                    Don't reupload source files or share credentials. Use this
-                    material only to produce short-form clips within this
-                    campaign's rules.
-                  </AlertDescription>
-                </Alert>
+                ) : sourceMissing ? (
+                  <div className="flex flex-col gap-4 rounded-lg border border-dashed border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
+                    <div className="flex h-20 w-32 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <VideoCamera weight="duotone" className="size-8" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        Source video unavailable
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        The creator removed this file or changed its Drive
+                        permissions. Download is disabled until a new link is
+                        published.
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" disabled>
+                      Download unavailable
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-background/50 p-4 sm:flex-row sm:items-center">
+                    <img
+                      src={campaign.sourceThumbnailUrl}
+                      alt="Source thumbnail"
+                      className="h-20 w-32 shrink-0 rounded-lg object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        Original video hosted on Google Drive
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {campaign.sourceContentUrl}
+                      </p>
+                    </div>
+                    <Button size="sm" asChild>
+                      <a
+                        href={campaign.sourceContentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Download source
+                        <CloudArrowDown className="size-4" />
+                      </a>
+                    </Button>
+                  </div>
+                )}
+                {!sourceChecking && !sourceMissing && (
+                  <Alert className="mt-4 border-warning/30 bg-warning/10">
+                    <Info className="size-4 text-warning" />
+                    <AlertTitle className="text-warning">Heads up</AlertTitle>
+                    <AlertDescription>
+                      Don't reupload source files or share credentials. Use this
+                      material only to produce short-form clips within this
+                      campaign's rules.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </CardContent>
             </Card>
           )}
@@ -664,40 +840,99 @@ export function CampaignDetailPage() {
                 />
               </div>
 
-              <Button
-                className="mt-6 w-full"
-                size="lg"
-                disabled={!canSubmit}
-                onClick={() => setSubmitOpen(true)}
-              >
-                {isBannedFromCampaign ? (
-                  <Prohibit className="size-4" weight="bold" />
-                ) : (
-                  <CurrencyDollar className="size-4" weight="bold" />
-                )}
-                {isBannedFromCampaign
-                  ? "You're banned"
-                  : campaign.status === "paused"
-                    ? "Campaign paused"
-                    : campaign.status === "completed"
-                      ? "Campaign ended"
-                      : budgetRemaining <= 0
-                        ? "Budget exhausted"
-                        : "Submit my clip"}
-              </Button>
-              <p className="mt-3 text-center text-[11px] text-muted-foreground">
-                {isBannedFromCampaign
-                  ? "The creator banned you from participating in this campaign."
-                  : campaign.status === "paused"
-                    ? "This campaign is temporarily paused by the creator."
-                    : campaign.status === "completed"
-                      ? "This campaign has ended."
-                      : budgetRemaining <= 0
-                        ? "This campaign has no available budget right now."
-                        : "48h creator review or auto-approve"}
-              </p>
+              {viewerIsCreatorRole ? (
+                isOwner ? null : (
+                  <div className="mt-6 rounded-lg border border-border/60 bg-muted/40 p-4 text-center">
+                    <p className="text-sm font-medium">Creator view</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Clippers submit clips here — creators just browse for
+                      inspiration.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <>
+                  <Button
+                    className="mt-6 w-full"
+                    size="lg"
+                    disabled={!canSubmit}
+                    onClick={() => setSubmitOpen(true)}
+                  >
+                    {isBannedFromCampaign ? (
+                      <Prohibit className="size-4" weight="bold" />
+                    ) : (
+                      <CurrencyDollar className="size-4" weight="bold" />
+                    )}
+                    {isBannedFromCampaign
+                      ? "You're banned"
+                      : campaign.status === "paused"
+                        ? "Campaign paused"
+                        : campaign.status === "completed"
+                          ? "Campaign ended"
+                          : budgetRemaining <= 0
+                            ? "Budget exhausted"
+                            : sourceMissing
+                              ? "Source unavailable"
+                              : "Submit my clip"}
+                  </Button>
+                  <p className="mt-3 text-center text-[11px] text-muted-foreground">
+                    {isBannedFromCampaign
+                      ? "The creator banned you from participating in this campaign."
+                      : campaign.status === "paused"
+                        ? "This campaign is temporarily paused by the creator."
+                        : campaign.status === "completed"
+                          ? "This campaign has ended."
+                          : budgetRemaining <= 0
+                            ? "This campaign has no available budget right now."
+                            : sourceMissing
+                              ? "The source video is no longer available. Ask the creator for a new link."
+                              : "48h creator review or auto-approve"}
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
+
+          {isOwner && campaign.isPrivate && shareUrl && (
+            <Card className="border-primary/30 bg-primary/5 backdrop-blur">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex items-center gap-2">
+                  <Lock className="size-4 text-primary" weight="fill" />
+                  <p className="text-sm font-medium">Private campaign link</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Share this with clippers you want to invite. Only people with
+                  the link can view and submit.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={shareUrl}
+                    className="h-8 font-mono text-[11px]"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(shareUrl)
+                        setLinkCopied(true)
+                        toast.success("Link copied")
+                      } catch {
+                        toast.error("Failed to copy")
+                      }
+                    }}
+                  >
+                    {linkCopied ? (
+                      <Check className="size-3.5" weight="bold" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {payoutTiers.length > 0 && (
             <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">

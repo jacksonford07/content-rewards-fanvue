@@ -5,13 +5,69 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { randomBytes } from "crypto";
 import { and, desc, eq, gt, ilike, inArray, not, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 
+function generatePrivateSlug(): string {
+  return randomBytes(9)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "");
+}
+
+function extractDriveFileId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match?.[1] ?? null;
+}
+
+const SOURCE_STATUS_TTL_MS = 5 * 60 * 1000;
+const sourceStatusCache = new Map<string, { available: boolean; at: number }>();
+
+async function probeDriveFile(fileId: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(
+      `https://drive.google.com/thumbnail?id=${fileId}&sz=w100`,
+      { method: "GET", redirect: "follow", signal: controller.signal },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 @Injectable()
 export class CampaignsService {
   constructor(@Inject(DB) private db: Database) {}
+
+  async sourceStatus(id: string): Promise<{ available: boolean }> {
+    const [campaign] = await this.db
+      .select({ url: schema.campaigns.sourceContentUrl })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, id))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+
+    const fileId = extractDriveFileId(campaign.url);
+    // Non-Drive sources aren't probed — treat as available so the UI still renders.
+    if (!fileId) return { available: true };
+
+    const cached = sourceStatusCache.get(fileId);
+    if (cached && Date.now() - cached.at < SOURCE_STATUS_TTL_MS) {
+      return { available: cached.available };
+    }
+
+    const available = await probeDriveFile(fileId);
+    sourceStatusCache.set(fileId, { available, at: Date.now() });
+    return { available };
+  }
 
   async list(filters: {
     platforms?: string[];
@@ -26,9 +82,15 @@ export class CampaignsService {
     const page = Math.max(1, filters.page ?? 1);
     const limit = Math.min(100, Math.max(1, filters.limit ?? 12));
     const offset = (page - 1) * limit;
-    const conditions = [eq(schema.campaigns.status, "active")];
+    const conditions = [
+      eq(schema.campaigns.status, "active"),
+      eq(schema.campaigns.isPrivate, false),
+    ];
 
     if (filters.viewerId) {
+      // Hide viewer's own campaigns — creators browse their own in /creator/campaigns.
+      conditions.push(not(eq(schema.campaigns.creatorId, filters.viewerId)));
+
       const banned = await this.db
         .select({ campaignId: schema.campaignBans.campaignId })
         .from(schema.campaignBans)
@@ -149,6 +211,22 @@ export class CampaignsService {
 
     if (!campaign) throw new NotFoundException("Campaign not found");
 
+    return this.hydrate(campaign);
+  }
+
+  async getBySlug(slug: string) {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.privateSlug, slug))
+      .limit(1);
+
+    if (!campaign) throw new NotFoundException("Campaign not found");
+
+    return this.hydrate(campaign);
+  }
+
+  private async hydrate(campaign: typeof schema.campaigns.$inferSelect) {
     const [creator] = await this.db
       .select()
       .from(schema.users)
@@ -164,12 +242,110 @@ export class CampaignsService {
           sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
       })
       .from(schema.submissions)
-      .where(eq(schema.submissions.campaignId, id));
+      .where(eq(schema.submissions.campaignId, campaign.id));
 
     const creatorsMap = new Map([[creator!.id, creator!]]);
-    const statsMap = new Map([[id, stats!]]);
+    const statsMap = new Map([[campaign.id, stats!]]);
 
     return this.serialize(campaign, creatorsMap, statsMap);
+  }
+
+  async topCampaigns(limit = 10, viewerId?: string) {
+    const max = Math.min(50, Math.max(1, limit));
+
+    const conditions = [
+      eq(schema.campaigns.status, "active"),
+      eq(schema.campaigns.isPrivate, false),
+    ];
+    if (viewerId) {
+      conditions.push(not(eq(schema.campaigns.creatorId, viewerId)));
+    }
+
+    const rows = await this.db
+      .select({
+        campaign: schema.campaigns,
+        totalViews: sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+        totalSubmissions: sql<number>`count(${schema.submissions.id})::int`,
+      })
+      .from(schema.campaigns)
+      .leftJoin(
+        schema.submissions,
+        eq(schema.submissions.campaignId, schema.campaigns.id),
+      )
+      .where(and(...conditions))
+      .groupBy(schema.campaigns.id)
+      .orderBy(
+        desc(sql`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)`),
+        desc(schema.campaigns.createdAt),
+      )
+      .limit(max);
+
+    const creatorIds = [...new Set(rows.map((r) => r.campaign.creatorId))];
+    const creators =
+      creatorIds.length > 0
+        ? await this.db
+            .select()
+            .from(schema.users)
+            .where(inArray(schema.users.id, creatorIds))
+        : [];
+    const creatorsMap = new Map(creators.map((c) => [c.id, c]));
+
+    return rows.map((r) => {
+      const creator = creatorsMap.get(r.campaign.creatorId);
+      return {
+        id: r.campaign.id,
+        title: r.campaign.title,
+        sourceThumbnailUrl: r.campaign.sourceThumbnailUrl,
+        rewardRatePer1k: r.campaign.rewardRatePer1kCents / 100,
+        totalViews: r.totalViews,
+        totalSubmissions: r.totalSubmissions,
+        creator: creator
+          ? {
+              id: creator.id,
+              name: creator.displayName,
+              handle: creator.handle,
+              avatarUrl: creator.avatarUrl ?? "",
+            }
+          : null,
+      };
+    });
+  }
+
+  async topClippers(limit = 10) {
+    const max = Math.min(50, Math.max(1, limit));
+
+    const rows = await this.db
+      .select({
+        user: schema.users,
+        earningsCents: sql<number>`coalesce(sum(${schema.submissions.payoutAmountCents}), 0)::int`,
+        totalViews: sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+        submissionCount: sql<number>`count(${schema.submissions.id})::int`,
+      })
+      .from(schema.submissions)
+      .innerJoin(schema.users, eq(schema.users.id, schema.submissions.fanId))
+      .where(
+        inArray(schema.submissions.status, [
+          "approved",
+          "auto_approved",
+          "paid",
+        ]),
+      )
+      .groupBy(schema.users.id)
+      .orderBy(
+        desc(sql`coalesce(sum(${schema.submissions.payoutAmountCents}), 0)`),
+        desc(sql`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)`),
+      )
+      .limit(max);
+
+    return rows.map((r) => ({
+      id: r.user.id,
+      name: r.user.displayName,
+      handle: r.user.handle,
+      avatarUrl: r.user.avatarUrl ?? "",
+      earnings: r.earningsCents / 100,
+      totalViews: r.totalViews,
+      submissionCount: r.submissionCount,
+    }));
   }
 
   async create(
@@ -188,10 +364,12 @@ export class CampaignsService {
       minPayoutThreshold?: number;
       maxPayoutPerClip?: number;
       status?: string;
+      isPrivate?: boolean;
     },
   ) {
     const status =
       data.status === "pending_budget" ? "pending_budget" : "draft";
+    const isPrivate = data.isPrivate === true;
     const [campaign] = await this.db
       .insert(schema.campaigns)
       .values({
@@ -212,6 +390,8 @@ export class CampaignsService {
           ? Math.round(data.maxPayoutPerClip * 100)
           : null,
         status,
+        isPrivate,
+        privateSlug: isPrivate ? generatePrivateSlug() : null,
       })
       .returning();
 
@@ -235,6 +415,7 @@ export class CampaignsService {
       minPayoutThreshold?: number;
       maxPayoutPerClip?: number;
       status?: string;
+      isPrivate?: boolean;
     },
   ) {
     const [existing] = await this.db
@@ -283,6 +464,14 @@ export class CampaignsService {
         updateData.maxPayoutPerClipCents = data.maxPayoutPerClip
           ? Math.round(data.maxPayoutPerClip * 100)
           : null;
+      if (data.isPrivate !== undefined) {
+        updateData.isPrivate = data.isPrivate;
+        if (data.isPrivate && !existing.privateSlug) {
+          updateData.privateSlug = generatePrivateSlug();
+        } else if (!data.isPrivate) {
+          updateData.privateSlug = null;
+        }
+      }
       if (data.status === "pending_budget")
         updateData.status = "pending_budget";
     }
@@ -634,6 +823,8 @@ export class CampaignsService {
         ? c.maxPayoutPerClipCents / 100
         : undefined,
       status: c.status,
+      isPrivate: c.isPrivate,
+      privateSlug: c.privateSlug,
       createdAt: c.createdAt.toISOString(),
       goesLiveAt: c.goesLiveAt?.toISOString() ?? "",
       endsAt: c.endsAt?.toISOString(),
@@ -662,6 +853,8 @@ export class CampaignsService {
         ? c.maxPayoutPerClipCents / 100
         : undefined,
       status: c.status,
+      isPrivate: c.isPrivate,
+      privateSlug: c.privateSlug,
       createdAt: c.createdAt.toISOString(),
       goesLiveAt: c.goesLiveAt?.toISOString() ?? "",
       endsAt: c.endsAt?.toISOString(),

@@ -53,6 +53,12 @@ export function RoleSelectPage() {
     try {
       await api.patch("/users/me", { role: pendingRole })
       await refresh()
+      const savedRedirect = localStorage.getItem("cr_post_login_redirect")
+      if (savedRedirect) {
+        localStorage.removeItem("cr_post_login_redirect")
+        navigate(savedRedirect, { replace: true })
+        return
+      }
       navigate(pendingRole === "clipper" ? "/" : "/creator/campaigns")
     } catch {
       toast.error("Couldn't save your choice. Please try again.")

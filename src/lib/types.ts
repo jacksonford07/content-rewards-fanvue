@@ -42,6 +42,8 @@ export interface Campaign {
   minPayoutThreshold: number
   maxPayoutPerClip?: number
   status: CampaignStatus
+  isPrivate?: boolean
+  privateSlug?: string | null
   createdAt: string
   goesLiveAt: string
   endsAt?: string

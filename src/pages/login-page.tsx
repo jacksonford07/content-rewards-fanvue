@@ -10,8 +10,10 @@ import {
   CheckCircle,
   Confetti,
 } from "@phosphor-icons/react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+
+const POST_LOGIN_REDIRECT_KEY = "cr_post_login_redirect"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -19,7 +21,19 @@ import { cn } from "@/lib/utils"
 
 export function LoginPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const error = searchParams.get("error")
+
+  useEffect(() => {
+    // Capture where the user was headed before AuthGuard kicked them to /login,
+    // so the auth callback can send them back after sign-in.
+    const fromState = location.state as { from?: { pathname?: string; search?: string } } | null
+    const fromPath = fromState?.from?.pathname
+    if (fromPath && fromPath !== "/login") {
+      const search = fromState?.from?.search ?? ""
+      localStorage.setItem(POST_LOGIN_REDIRECT_KEY, fromPath + search)
+    }
+  }, [location.state])
 
   useEffect(() => {
     // `not_creator` is an onboarding state, not an error — handled inline.
@@ -39,7 +53,7 @@ export function LoginPage() {
   }, [error, searchParams, setSearchParams])
 
   const handleSignIn = () => {
-    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3000"
+    const apiUrl = import.meta.env.VITE_API_URL || ""
     window.location.href = `${apiUrl}/api/auth/fanvue`
   }
 
@@ -165,8 +179,7 @@ export function LoginPage() {
                           className="flex-1"
                           onClick={() => {
                             const apiUrl =
-                              import.meta.env.VITE_API_URL ||
-                              "http://localhost:3000"
+                              import.meta.env.VITE_API_URL || ""
                             window.location.href = `${apiUrl}/api/auth/dev-login?role=clipper`
                           }}
                         >
@@ -178,8 +191,7 @@ export function LoginPage() {
                           className="flex-1"
                           onClick={() => {
                             const apiUrl =
-                              import.meta.env.VITE_API_URL ||
-                              "http://localhost:3000"
+                              import.meta.env.VITE_API_URL || ""
                             window.location.href = `${apiUrl}/api/auth/dev-login?role=creator`
                           }}
                         >

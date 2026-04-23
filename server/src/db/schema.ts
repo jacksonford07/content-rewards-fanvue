@@ -70,6 +70,8 @@ export const campaigns = pgTable("campaigns", {
   })
     .default("draft")
     .notNull(),
+  isPrivate: boolean("is_private").default(false).notNull(),
+  privateSlug: text("private_slug").unique(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

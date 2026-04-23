@@ -92,6 +92,7 @@ export function AppSidebar() {
 
   const creatorNav = useMemo(() => [
     { to: "/creator/campaigns", label: "My campaigns", icon: MegaphoneSimple },
+    { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
     { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
     { to: "/wallet", label: "Wallet", icon: Wallet },
