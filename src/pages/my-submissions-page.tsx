@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import {
   ArrowSquareOut,
+  ChartLineUp,
   Clock,
   CheckCircle,
   XCircle,
@@ -9,7 +10,10 @@ import {
   Eye,
   Timer,
   Prohibit,
+  Warning,
 } from "@phosphor-icons/react"
+
+import { ViewTrendDialog } from "@/components/view-trend-dialog"
 
 import {
   Tabs,
@@ -227,6 +231,17 @@ function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?
 }
 
 function SubmissionRow({ submission }: { submission: Submission }) {
+  const [trendOpen, setTrendOpen] = useState(false)
+  const isTracking =
+    submission.status === "approved" ||
+    submission.status === "auto_approved" ||
+    submission.status === "pending"
+  const showLiveViews =
+    isTracking &&
+    submission.lastViewCount != null &&
+    submission.lastViewCount > 0
+  const canShowTrend =
+    (showLiveViews || submission.viewsAtDay30 != null) && !submission.isBanned
   return (
     <Card className="overflow-hidden border-border/60 bg-card/70 backdrop-blur transition-colors hover:border-border">
       <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:p-5">
@@ -253,8 +268,11 @@ function SubmissionRow({ submission }: { submission: Submission }) {
             </Link>
             <p className="text-xs text-muted-foreground">
               by {submission.campaignCreator} ·{" "}
-              {platformLabels[submission.platform]} ·{" "}
-              {timeAgo(submission.submittedAt)}
+              {platformLabels[submission.platform]}
+              {submission.platformUsername
+                ? ` · @${submission.platformUsername}`
+                : ""}{" "}
+              · {timeAgo(submission.submittedAt)}
             </p>
           </div>
 
@@ -269,13 +287,22 @@ function SubmissionRow({ submission }: { submission: Submission }) {
                 Auto-approves in {timeUntil(submission.autoApproveAt)}
               </Badge>
             )}
-            {submission.status === "approved" && submission.lockDate && (
+            {isTracking && submission.lockDate && (
               <Badge
                 variant="outline"
                 className="gap-1.5 border-border/70 text-muted-foreground"
               >
                 <Timer className="size-3" />
-                View lock in {timeUntil(submission.lockDate, true)}
+                Day-30 in {timeUntil(submission.lockDate, true)}
+              </Badge>
+            )}
+            {submission.postDeletedAt && (
+              <Badge
+                variant="outline"
+                className="gap-1.5 border-warning/40 bg-warning/10 text-warning"
+              >
+                <Warning className="size-3" weight="fill" />
+                Post deleted · count frozen
               </Badge>
             )}
           </div>
@@ -292,35 +319,71 @@ function SubmissionRow({ submission }: { submission: Submission }) {
 
 
         {/* Metrics */}
-        <div className="flex items-center gap-4 text-sm md:flex-col md:items-end md:gap-1">
-          {submission.viewsAtDay30 != null && (
+        <div className="flex items-center gap-4 text-sm md:flex-col md:items-end md:gap-1.5">
+          {submission.viewsAtDay30 != null ? (
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Eye className="size-3.5" />
               <span className="tabular-nums">
                 {formatCompactNumber(submission.viewsAtDay30)}
               </span>
-              <span className="text-[11px]">views</span>
+              <span className="text-[11px]">final views</span>
             </div>
-          )}
-          {submission.status === "paid" && submission.payoutAmount && (
+          ) : showLiveViews ? (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Eye className="size-3.5" />
+              <span className="tabular-nums">
+                {formatCompactNumber(submission.lastViewCount!)}
+              </span>
+              <span className="text-[11px]">live views</span>
+            </div>
+          ) : null}
+          {submission.status === "paid" && submission.payoutAmount ? (
             <div className="text-lg font-semibold tabular-nums text-primary">
               +{formatCurrency(submission.payoutAmount)}
             </div>
-          )}
+          ) : isTracking && submission.pendingEarnings ? (
+            <div className="text-right">
+              <div className="text-base font-semibold tabular-nums text-primary">
+                {formatCurrency(submission.pendingEarnings)}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                earned · paid at day 30
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        {/* Action */}
-        <Button variant="outline" size="sm" asChild className="md:ml-2">
-          <a
-            href={submission.postUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View post
-            <ArrowSquareOut className="size-3.5" />
-          </a>
-        </Button>
+        {/* Actions */}
+        <div className="flex gap-2 md:ml-2 md:flex-col">
+          {canShowTrend && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTrendOpen(true)}
+            >
+              <ChartLineUp className="size-3.5" />
+              Trend
+            </Button>
+          )}
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={submission.postUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View post
+              <ArrowSquareOut className="size-3.5" />
+            </a>
+          </Button>
+        </div>
       </CardContent>
+      {canShowTrend && (
+        <ViewTrendDialog
+          submission={submission}
+          open={trendOpen}
+          onOpenChange={setTrendOpen}
+        />
+      )}
     </Card>
   )
 }

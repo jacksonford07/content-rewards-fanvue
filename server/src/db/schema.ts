@@ -120,6 +120,26 @@ export const submissions = pgTable("submissions", {
     withTimezone: true,
   }),
   lockDate: timestamp("lock_date", { withTimezone: true }),
+  postedAt: timestamp("posted_at", { withTimezone: true }),
+  lastViewCount: integer("last_view_count").default(0).notNull(),
+  lastScrapedAt: timestamp("last_scraped_at", { withTimezone: true }),
+  postDeletedAt: timestamp("post_deleted_at", { withTimezone: true }),
+  platformUsername: text("platform_username"),
+  pendingEarningsCents: integer("pending_earnings_cents").default(0).notNull(),
+});
+
+// ─── Submission View Snapshots ───────────────────────────────────────────────
+
+export const submissionViewSnapshots = pgTable("submission_view_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id")
+    .notNull()
+    .references(() => submissions.id),
+  capturedAt: timestamp("captured_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  viewCount: integer("view_count").notNull(),
+  available: boolean("available").default(true).notNull(),
 });
 
 // ─── Notifications ───────────────────────────────────────────────────────────
@@ -225,7 +245,7 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
   transactions: many(campaignTransactions),
 }));
 
-export const submissionsRelations = relations(submissions, ({ one }) => ({
+export const submissionsRelations = relations(submissions, ({ one, many }) => ({
   campaign: one(campaigns, {
     fields: [submissions.campaignId],
     references: [campaigns.id],
@@ -234,7 +254,18 @@ export const submissionsRelations = relations(submissions, ({ one }) => ({
     fields: [submissions.fanId],
     references: [users.id],
   }),
+  viewSnapshots: many(submissionViewSnapshots),
 }));
+
+export const submissionViewSnapshotsRelations = relations(
+  submissionViewSnapshots,
+  ({ one }) => ({
+    submission: one(submissions, {
+      fields: [submissionViewSnapshots.submissionId],
+      references: [submissions.id],
+    }),
+  }),
+);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, {

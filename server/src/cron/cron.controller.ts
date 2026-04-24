@@ -29,6 +29,20 @@ export class CronController {
     return this.cronService.sendViewsReadyReminders();
   }
 
+  @Public()
+  @Post("track-views")
+  trackViews(@Headers("x-cron-secret") secret: string) {
+    this.verifySecret(secret);
+    return this.cronService.trackViews();
+  }
+
+  @Public()
+  @Post("finalize-views")
+  finalizeViews(@Headers("x-cron-secret") secret: string) {
+    this.verifySecret(secret);
+    return this.cronService.finalizeViews();
+  }
+
   private verifySecret(secret: string) {
     const expected = this.config.get<string>("CRON_SECRET", "cron-secret");
     if (secret !== expected) {

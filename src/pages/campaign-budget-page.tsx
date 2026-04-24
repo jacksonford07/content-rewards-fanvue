@@ -9,7 +9,10 @@ import {
   CheckCircle,
   Clock,
   CurrencyDollar,
+  Info,
+  Lock,
   Plus,
+  X,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -18,7 +21,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -43,6 +45,7 @@ import { useAuth } from "@/hooks/use-auth"
 import {
   useCampaign,
   useCampaignTransactions,
+  useCompleteCampaign,
   useFundCampaign,
 } from "@/queries/campaigns"
 import { NotFoundCard } from "@/components/not-found-card"
@@ -62,8 +65,10 @@ export function CampaignBudgetPage() {
   const transactions = transactionsData as unknown as BudgetTransaction[]
   const loading = campaignLoading || txLoading
   const fundMutation = useFundCampaign()
+  const completeMutation = useCompleteCampaign()
 
   const [addFundsOpen, setAddFundsOpen] = useState(false)
+  const [completeOpen, setCompleteOpen] = useState(false)
   const [amount, setAmount] = useState("")
 
   if (loading) {
@@ -140,10 +145,20 @@ export function CampaignBudgetPage() {
 
   if (!campaign) return null
 
-  const remaining = campaign.totalBudget - campaign.budgetSpent
-  const pct = campaign.totalBudget
-    ? Math.round((campaign.budgetSpent / campaign.totalBudget) * 100)
+  const reserved = campaign.budgetReserved ?? 0
+  const available =
+    campaign.budgetAvailable ??
+    Math.max(campaign.totalBudget - campaign.budgetSpent - reserved, 0)
+  const spentPct = campaign.totalBudget
+    ? Math.min(100, Math.round((campaign.budgetSpent / campaign.totalBudget) * 100))
     : 0
+  const reservedPct = campaign.totalBudget
+    ? Math.min(
+        100 - spentPct,
+        Math.round((reserved / campaign.totalBudget) * 100),
+      )
+    : 0
+  const committedPct = spentPct + reservedPct
 
   const handleAddFunds = async () => {
     if (!id) return
@@ -157,6 +172,35 @@ export function CampaignBudgetPage() {
       setAmount("")
     } catch {
       toast.error("Failed to add funds")
+    }
+  }
+
+  const openSubmissions = campaign?.openSubmissions ?? 0
+  const isClosable =
+    campaign != null &&
+    (campaign.status === "active" || campaign.status === "paused") &&
+    openSubmissions === 0
+  const refundable = available
+
+  const handleComplete = async () => {
+    if (!id) return
+    try {
+      await completeMutation.mutateAsync(id)
+      toast.success("Campaign completed", {
+        description:
+          refundable > 0
+            ? `${formatCurrency(refundable)} refunded to your wallet.`
+            : "Campaign marked as completed.",
+      })
+      await refresh()
+      setCompleteOpen(false)
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { message?: string } } }).response
+              ?.data?.message
+          : undefined
+      toast.error(msg ?? "Failed to complete campaign")
     }
   }
 
@@ -203,14 +247,50 @@ export function CampaignBudgetPage() {
             {campaign.title} — track spend and manage escrow.
           </p>
         </div>
-        <Button onClick={() => setAddFundsOpen(true)}>
-          <Plus className="size-4" weight="bold" />
-          Add funds
-        </Button>
+        <div className="flex items-center gap-2">
+          {campaign.status !== "completed" && (
+            <Button
+              variant="outline"
+              onClick={() => setCompleteOpen(true)}
+              disabled={!isClosable}
+              title={
+                !isClosable
+                  ? openSubmissions > 0
+                    ? `Wait for ${openSubmissions} active submission${openSubmissions === 1 ? "" : "s"} to finalize first.`
+                    : "Campaign can't be closed in its current state."
+                  : refundable > 0
+                  ? `Close campaign and refund ${formatCurrency(refundable)}`
+                  : "Close campaign"
+              }
+            >
+              <X className="size-4" weight="bold" />
+              Complete campaign
+            </Button>
+          )}
+          {campaign.status !== "completed" && (
+            <Button onClick={() => setAddFundsOpen(true)}>
+              <Plus className="size-4" weight="bold" />
+              Add funds
+            </Button>
+          )}
+        </div>
       </div>
 
+      {campaign.status !== "completed" && (
+        <div className="mb-6 flex items-start gap-2 rounded-lg border border-border/60 bg-muted/40 p-3 text-xs text-muted-foreground">
+          <Info className="mt-0.5 size-4 shrink-0 text-primary" weight="fill" />
+          <p>
+            Once all clippers in this campaign have been paid out, you can hit{" "}
+            <span className="font-medium text-foreground">Complete campaign</span>{" "}
+            to close it and refund any leftover budget back to your wallet. Pause
+            the campaign first if you want to stop accepting new clippers while
+            the existing ones finish their 30-day window.
+          </p>
+        </div>
+      )}
+
       {/* Stats row */}
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
           <div className="flex items-center gap-2 text-primary">
             <CurrencyDollar className="size-4" weight="fill" />
@@ -234,18 +314,41 @@ export function CampaignBudgetPage() {
           </p>
         </Card>
         <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
-          <div className="flex items-center gap-2 text-success">
-            <Lightning className="size-4" weight="fill" />
+          <div className="flex items-center gap-2 text-primary/80">
+            <Lock className="size-4" weight="fill" />
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Remaining
+              Reserved
             </span>
           </div>
           <p className="mt-2 text-2xl font-bold tabular-nums">
-            {formatCurrency(remaining)}
+            {formatCurrency(reserved)}
           </p>
-          <Progress value={pct} className="mt-2 h-1.5" />
           <p className="mt-1 text-[10px] text-muted-foreground">
-            {pct}% of budget used
+            Projected payouts from active clips
+          </p>
+        </Card>
+        <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">
+          <div className="flex items-center gap-2 text-success">
+            <Lightning className="size-4" weight="fill" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Available
+            </span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tabular-nums">
+            {formatCurrency(available)}
+          </p>
+          <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="absolute inset-y-0 left-0 bg-primary"
+              style={{ width: `${spentPct}%` }}
+            />
+            <div
+              className="absolute inset-y-0 bg-primary/40"
+              style={{ left: `${spentPct}%`, width: `${reservedPct}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {committedPct}% committed
           </p>
         </Card>
       </div>
@@ -378,6 +481,57 @@ export function CampaignBudgetPage() {
               onClick={handleAddFunds}
             >
               Add {amount ? formatCurrency(parseFloat(amount)) : "funds"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Complete campaign dialog */}
+      <Dialog
+        open={completeOpen}
+        onOpenChange={(open) => {
+          if (!completeMutation.isPending) setCompleteOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Complete campaign?</DialogTitle>
+            <DialogDescription>
+              This marks {campaign.title} as completed. No new submissions can
+              be accepted, and the campaign can only be reopened by adding
+              funds.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-border/60 bg-muted/40 p-3 text-sm">
+            {refundable > 0 ? (
+              <p>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {formatCurrency(refundable)}
+                </span>{" "}
+                of unspent budget will be refunded to your wallet.
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                No leftover budget to refund — the full budget has already been
+                paid out.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={completeMutation.isPending}
+              onClick={() => setCompleteOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={completeMutation.isPending}
+              onClick={handleComplete}
+            >
+              {refundable > 0
+                ? `Close & refund ${formatCurrency(refundable)}`
+                : "Close campaign"}
             </Button>
           </DialogFooter>
         </DialogContent>

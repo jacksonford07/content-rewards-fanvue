@@ -30,7 +30,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Progress } from "@/components/ui/progress"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -300,6 +299,10 @@ export function CampaignDetailPage() {
     </div>
   )
 
+  const reserved = campaign.budgetReserved ?? 0
+  const budgetAvailable =
+    campaign.budgetAvailable ??
+    Math.max(campaign.totalBudget - campaign.budgetSpent - reserved, 0)
   const budgetRemaining = campaign.totalBudget - campaign.budgetSpent
   const isBannedFromCampaign = myClips.some((c) => c.isBanned)
   const banReason = myClips.find((c) => c.isBanned)?.rejectionReason
@@ -307,7 +310,7 @@ export function CampaignDetailPage() {
   const viewerIsCreatorRole = user?.role === "creator"
   const canSubmit =
     campaign.status === "active" &&
-    budgetRemaining > 0 &&
+    budgetAvailable > 0 &&
     !isBannedFromCampaign &&
     !viewerIsCreatorRole &&
     !sourceMissing &&
@@ -315,9 +318,12 @@ export function CampaignDetailPage() {
   const shareUrl = campaign.privateSlug
     ? `${window.location.origin}/c/${campaign.privateSlug}`
     : null
-  const budgetPct = Math.round(
-    (campaign.budgetSpent / campaign.totalBudget) * 100
-  )
+  const spentPct = campaign.totalBudget
+    ? Math.min(100, Math.round((campaign.budgetSpent / campaign.totalBudget) * 100))
+    : 0
+  const reservedPct = campaign.totalBudget
+    ? Math.min(100 - spentPct, Math.round((reserved / campaign.totalBudget) * 100))
+    : 0
 
   const payoutTiers = (() => {
     const rate = campaign.rewardRatePer1k
@@ -513,7 +519,12 @@ export function CampaignDetailPage() {
                 <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
                   {campaign.title}
                 </h1>
-                {campaign.status === "active" ? (
+                {campaign.status === "active" && budgetAvailable <= 0 ? (
+                  <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">
+                    <Lock weight="fill" className="size-3" />
+                    Funds exhausted
+                  </Badge>
+                ) : campaign.status === "active" ? (
                   <Badge variant="outline" className="border-success/40 bg-success/10 text-success">
                     <Lightning weight="fill" className="size-3" />
                     Live
@@ -806,12 +817,22 @@ export function CampaignDetailPage() {
 
               <div className="space-y-3 text-sm">
                 <Row
-                  label="Budget remaining"
-                  value={formatCurrency(budgetRemaining)}
+                  label="Budget available"
+                  value={formatCurrency(budgetAvailable)}
                 />
-                <Progress value={budgetPct} className="h-1.5" />
+                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-primary"
+                    style={{ width: `${spentPct}%` }}
+                  />
+                  <div
+                    className="absolute inset-y-0 bg-primary/40"
+                    style={{ left: `${spentPct}%`, width: `${reservedPct}%` }}
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  {budgetPct}% of {formatCurrency(campaign.totalBudget)} spent
+                  {formatCurrency(budgetAvailable)} available of{" "}
+                  {formatCurrency(campaign.totalBudget)}
                 </p>
               </div>
 

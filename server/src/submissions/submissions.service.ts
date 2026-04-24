@@ -3,18 +3,36 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
+import { ScrapersService } from "../scrapers/scrapers.service.js";
+import { resolveShortUrl } from "../scrapers/scrapers.types.js";
 
 type EnrichedSubmission = {
   status: string;
   lockDate?: string;
   isBanned?: boolean;
 };
+
+function calcPendingEarningsCents(
+  viewCount: number,
+  campaign: typeof schema.campaigns.$inferSelect,
+): number {
+  if (viewCount < campaign.minPayoutThreshold) return 0;
+  let cents = Math.round((viewCount / 1000) * campaign.rewardRatePer1kCents);
+  if (
+    campaign.maxPayoutPerClipCents &&
+    cents > campaign.maxPayoutPerClipCents
+  ) {
+    cents = campaign.maxPayoutPerClipCents;
+  }
+  return cents;
+}
 
 function filterInboxByTab<T extends EnrichedSubmission>(
   rows: T[],
@@ -41,6 +59,8 @@ function filterInboxByTab<T extends EnrichedSubmission>(
       return rows.filter((s) => s.status === "rejected" && !s.isBanned);
     case "banned":
       return rows.filter((s) => s.status === "rejected" && !!s.isBanned);
+    case "paid":
+      return rows.filter((s) => s.status === "paid");
     default:
       return rows;
   }
@@ -71,9 +91,12 @@ function filterMineByTab<T extends EnrichedSubmission>(
 
 @Injectable()
 export class SubmissionsService {
+  private readonly logger = new Logger(SubmissionsService.name);
+
   constructor(
     @Inject(DB) private db: Database,
     private notifications: NotificationsService,
+    private scrapers: ScrapersService,
   ) {}
 
   async submit(
@@ -112,18 +135,23 @@ export class SubmissionsService {
     if (ban) throw new ForbiddenException("You are banned from this campaign");
 
     const autoApproveAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    const postUrl = await resolveShortUrl(data.postUrl);
 
     const [submission] = await this.db
       .insert(schema.submissions)
       .values({
         campaignId: data.campaignId,
         fanId,
-        postUrl: data.postUrl,
+        postUrl,
         platform: data.platform as "tiktok" | "instagram" | "youtube",
         status: "pending",
         autoApproveAt,
       })
       .returning();
+
+    // Kick off first scrape synchronously so the UI shows views immediately.
+    // A failure here must not fail the submission — cron will retry.
+    await this.initialScrape(submission!);
 
     // Notify creator
     await this.notifications.create({
@@ -135,6 +163,145 @@ export class SubmissionsService {
     });
 
     return this.serializeSubmission(submission!);
+  }
+
+  private async initialScrape(
+    submission: typeof schema.submissions.$inferSelect,
+  ) {
+    try {
+      const now = new Date();
+      const result = await this.scrapers.getViews(submission.postUrl);
+
+      await this.db.insert(schema.submissionViewSnapshots).values({
+        submissionId: submission.id,
+        viewCount: result.viewCount ?? 0,
+        available: result.available,
+        capturedAt: now,
+      });
+
+      const update: Partial<typeof schema.submissions.$inferInsert> = {
+        lastScrapedAt: now,
+        updatedAt: now,
+      };
+      if (result.available && typeof result.viewCount === "number") {
+        update.lastViewCount = result.viewCount;
+      }
+      if (result.postedAt) {
+        update.postedAt = result.postedAt;
+        update.lockDate = new Date(
+          result.postedAt.getTime() + 30 * 24 * 60 * 60 * 1000,
+        );
+      }
+      if (result.platformUsername) {
+        update.platformUsername = result.platformUsername;
+      }
+
+      await this.db
+        .update(schema.submissions)
+        .set(update)
+        .where(eq(schema.submissions.id, submission.id));
+
+      await this.recomputeCampaignReservations(submission.campaignId);
+    } catch (err) {
+      this.logger.error(
+        `Initial scrape failed for submission ${submission.id}: ${String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Calculates projected earnings in cents for a given view count and
+   * campaign, applying min-threshold and per-clip cap (but NOT the
+   * campaign's remaining budget — that's handled at final settlement).
+   * Exported for use from the cron after each scrape.
+   */
+  calcPendingEarningsCents(
+    viewCount: number,
+    campaign: typeof schema.campaigns.$inferSelect,
+  ): number {
+    return calcPendingEarningsCents(viewCount, campaign);
+  }
+
+  /**
+   * Allocate `pending_earnings_cents` across a campaign's active submissions
+   * in FIFO (earliest-submitted first) order, capped by the remaining pool
+   * (totalBudget - spent). Once the pool is exhausted, later submissions get
+   * whatever is left and anyone below them gets 0. Total reserved + spent is
+   * guaranteed to never exceed the campaign's total budget.
+   */
+  async recomputeCampaignReservations(campaignId: string): Promise<void> {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+    if (!campaign) return;
+
+    const subs = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, campaignId),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+        ),
+      )
+      .orderBy(asc(schema.submissions.createdAt));
+
+    let pool = Math.max(
+      0,
+      campaign.totalBudgetCents - campaign.budgetSpentCents,
+    );
+    const now = new Date();
+    for (const s of subs) {
+      const desired = calcPendingEarningsCents(s.lastViewCount, campaign);
+      const capped = Math.min(desired, pool);
+      if (capped !== s.pendingEarningsCents) {
+        await this.db
+          .update(schema.submissions)
+          .set({ pendingEarningsCents: capped, updatedAt: now })
+          .where(eq(schema.submissions.id, s.id));
+      }
+      pool = Math.max(0, pool - capped);
+    }
+  }
+
+  /**
+   * FIFO-ceiling for a given submission: the maximum pending earnings it can
+   * ever reach while higher-priority (earlier) submissions keep their current
+   * reservations. Used by the cron to skip wasted scrapes on submissions
+   * whose share of the pool is already taken by earlier clippers.
+   */
+  async getReservationCeilingCents(
+    submission: typeof schema.submissions.$inferSelect,
+    campaign: typeof schema.campaigns.$inferSelect,
+  ): Promise<number> {
+    const [row] = await this.db
+      .select({
+        sum: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
+      })
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, submission.campaignId),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+          sql`${schema.submissions.createdAt} < ${submission.createdAt}`,
+        ),
+      );
+    const earlierReserved = row?.sum ?? 0;
+    const poolTotal = Math.max(
+      0,
+      campaign.totalBudgetCents - campaign.budgetSpentCents,
+    );
+    return Math.max(0, poolTotal - earlierReserved);
   }
 
   async mine(
@@ -197,7 +364,12 @@ export class SubmissionsService {
 
   async inbox(
     creatorId: string,
-    params?: { tab?: string; page?: number; limit?: number },
+    params?: {
+      tab?: string;
+      page?: number;
+      limit?: number;
+      campaignId?: string;
+    },
   ) {
     const page = Math.max(1, params?.page ?? 1);
     const limit = Math.min(100, Math.max(1, params?.limit ?? 20));
@@ -207,12 +379,24 @@ export class SubmissionsService {
       .from(schema.campaigns)
       .where(eq(schema.campaigns.creatorId, creatorId));
 
-    const campaignIds = creatorCampaigns.map((c) => c.id);
-    if (campaignIds.length === 0) {
+    const ownedIds = new Set(creatorCampaigns.map((c) => c.id));
+    if (ownedIds.size === 0) {
       return {
         data: [],
         meta: { page, limit, totalItems: 0, totalPages: 1 },
       };
+    }
+
+    let campaignIds = [...ownedIds];
+    if (params?.campaignId) {
+      if (!ownedIds.has(params.campaignId)) {
+        // Quietly return empty rather than 403 — a stale URL shouldn't leak.
+        return {
+          data: [],
+          meta: { page, limit, totalItems: 0, totalPages: 1 },
+        };
+      }
+      campaignIds = [params.campaignId];
     }
 
     const rows = await this.db
@@ -239,15 +423,27 @@ export class SubmissionsService {
     };
   }
 
-  async inboxStats(creatorId: string) {
+  async inboxStats(creatorId: string, campaignId?: string) {
     const creatorCampaigns = await this.db
       .select({ id: schema.campaigns.id })
       .from(schema.campaigns)
       .where(eq(schema.campaigns.creatorId, creatorId));
 
-    const campaignIds = creatorCampaigns.map((c) => c.id);
-    if (campaignIds.length === 0) {
-      return { pending: 0, approved: 0, verify: 0, rejected: 0, banned: 0 };
+    const ownedIds = new Set(creatorCampaigns.map((c) => c.id));
+    const empty = {
+      pending: 0,
+      approved: 0,
+      verify: 0,
+      rejected: 0,
+      banned: 0,
+      paid: 0,
+    };
+    if (ownedIds.size === 0) return empty;
+
+    let campaignIds = [...ownedIds];
+    if (campaignId) {
+      if (!ownedIds.has(campaignId)) return empty;
+      campaignIds = [campaignId];
     }
 
     const rows = await this.db
@@ -262,6 +458,7 @@ export class SubmissionsService {
       verify: filterInboxByTab(enriched, "verify").length,
       rejected: filterInboxByTab(enriched, "rejected").length,
       banned: filterInboxByTab(enriched, "banned").length,
+      paid: filterInboxByTab(enriched, "paid").length,
     };
   }
 
@@ -334,6 +531,7 @@ export class SubmissionsService {
       .set({
         status: "rejected",
         rejectionReason: reason,
+        pendingEarningsCents: 0,
         creatorDecisionAt: new Date(),
         updatedAt: new Date(),
       })
@@ -353,6 +551,9 @@ export class SubmissionsService {
       actionUrl: "/submissions?tab=rejected",
     });
 
+    // Reservation freed — let the next in line take the slack.
+    await this.recomputeCampaignReservations(submission.campaignId);
+
     return { success: true };
   }
 
@@ -365,6 +566,7 @@ export class SubmissionsService {
       .set({
         status: "rejected",
         rejectionReason: reason,
+        pendingEarningsCents: 0,
         creatorDecisionAt: new Date(),
         updatedAt: new Date(),
       })
@@ -378,6 +580,8 @@ export class SubmissionsService {
         userId: submission.fanId,
       })
       .onConflictDoNothing();
+
+    await this.recomputeCampaignReservations(submission.campaignId);
 
     return { success: true };
   }
@@ -399,38 +603,87 @@ export class SubmissionsService {
 
     if (!campaign) throw new NotFoundException("Campaign not found");
 
-    // Calculate payout: (views / 1000) * rate
-    let payoutCents = Math.round(
-      (views / 1000) * campaign.rewardRatePer1kCents,
-    );
+    return this.settlePayout(submission, campaign, views);
+  }
 
-    // Check min threshold
-    if (views < campaign.minPayoutThreshold) {
-      payoutCents = 0;
+  async autoFinalizeDueSubmissions() {
+    const now = new Date();
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+    const due = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(
+        and(
+          inArray(schema.submissions.status, ["approved", "auto_approved"]),
+          sql`${schema.submissions.viewsAtDay30} IS NULL`,
+        ),
+      );
+
+    let finalized = 0;
+    for (const sub of due) {
+      const anchor = sub.postedAt ?? sub.createdAt;
+      if (anchor.getTime() + thirtyDaysMs > now.getTime()) continue;
+
+      const [campaign] = await this.db
+        .select()
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, sub.campaignId))
+        .limit(1);
+      if (!campaign) continue;
+
+      await this.settlePayout(sub, campaign, sub.lastViewCount ?? 0);
+      finalized++;
     }
 
-    // Cap by maxPayoutPerClip
-    if (campaign.maxPayoutPerClipCents && payoutCents > campaign.maxPayoutPerClipCents) {
-      payoutCents = campaign.maxPayoutPerClipCents;
+    return { finalized };
+  }
+
+  private async settlePayout(
+    submission: typeof schema.submissions.$inferSelect,
+    campaign: typeof schema.campaigns.$inferSelect,
+    views: number,
+  ) {
+    // Use same calc as pending earnings (threshold + per-clip cap) …
+    let payoutCents = calcPendingEarningsCents(views, campaign);
+
+    // …then cap by remaining pool AFTER subtracting other active
+    // reservations (FIFO priority — earlier clippers own their share).
+    const [otherReserved] = await this.db
+      .select({
+        sum: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
+      })
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, submission.campaignId),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+          sql`${schema.submissions.id} <> ${submission.id}`,
+        ),
+      );
+    const availableForMe =
+      campaign.totalBudgetCents -
+      campaign.budgetSpentCents -
+      (otherReserved?.sum ?? 0);
+    if (payoutCents > availableForMe) {
+      payoutCents = Math.max(availableForMe, 0);
     }
 
-    // Cap by remaining budget
-    const remainingBudget =
-      campaign.totalBudgetCents - campaign.budgetSpentCents;
-    if (payoutCents > remainingBudget) {
-      payoutCents = remainingBudget;
-    }
-
-    // Update submission
+    // Update submission — clear pending earnings since they've been settled
     await this.db
       .update(schema.submissions)
       .set({
         status: "paid",
         viewsAtDay30: views,
         payoutAmountCents: payoutCents,
+        pendingEarningsCents: 0,
         updatedAt: new Date(),
       })
-      .where(eq(schema.submissions.id, id));
+      .where(eq(schema.submissions.id, submission.id));
 
     if (payoutCents > 0) {
       // Credit clipper wallet
@@ -476,6 +729,11 @@ export class SubmissionsService {
         actionUrl: "/wallet",
       });
     }
+
+    // This submission's reservation moved from pending to spent. Recompute
+    // FIFO-capped reservations for the remaining active submissions so any
+    // slack from rounding / per-clip caps goes to the next in line.
+    await this.recomputeCampaignReservations(submission.campaignId);
 
     // Check if campaign budget is exhausted → mark completed
     await this.checkCampaignCompletion(submission.campaignId);
@@ -648,8 +906,48 @@ export class SubmissionsService {
         verificationStartedAt: s.verificationStartedAt?.toISOString(),
         autoApproveAt: s.autoApproveAt?.toISOString(),
         lockDate: s.lockDate?.toISOString(),
+        lastViewCount: s.lastViewCount ?? 0,
+        lastScrapedAt: s.lastScrapedAt?.toISOString(),
+        postedAt: s.postedAt?.toISOString(),
+        postDeletedAt: s.postDeletedAt?.toISOString(),
+        platformUsername: s.platformUsername ?? undefined,
+        pendingEarnings: s.pendingEarningsCents
+          ? s.pendingEarningsCents / 100
+          : 0,
       };
     });
+  }
+
+  async getSnapshots(submissionId: string, userId: string) {
+    const [submission] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submissionId))
+      .limit(1);
+
+    if (!submission) throw new NotFoundException("Submission not found");
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+
+    const isFan = submission.fanId === userId;
+    const isCreator = campaign?.creatorId === userId;
+    if (!isFan && !isCreator) throw new ForbiddenException();
+
+    const snapshots = await this.db
+      .select()
+      .from(schema.submissionViewSnapshots)
+      .where(eq(schema.submissionViewSnapshots.submissionId, submissionId))
+      .orderBy(schema.submissionViewSnapshots.capturedAt);
+
+    return snapshots.map((s) => ({
+      capturedAt: s.capturedAt.toISOString(),
+      viewCount: s.viewCount,
+      available: s.available,
+    }));
   }
 
   private serializeSubmission(s: typeof schema.submissions.$inferSelect) {

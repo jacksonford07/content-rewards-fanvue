@@ -41,17 +41,22 @@ export class SubmissionsController {
     @Query("tab") tab?: string,
     @Query("page") page?: string,
     @Query("limit") limit?: string,
+    @Query("campaignId") campaignId?: string,
   ) {
     return this.submissionsService.inbox(req.user.id, {
       tab,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      campaignId,
     });
   }
 
   @Get("inbox/stats")
-  inboxStats(@Req() req: { user: { id: string } }) {
-    return this.submissionsService.inboxStats(req.user.id);
+  inboxStats(
+    @Req() req: { user: { id: string } },
+    @Query("campaignId") campaignId?: string,
+  ) {
+    return this.submissionsService.inboxStats(req.user.id, campaignId);
   }
 
   @Get("campaign/:campaignId")
@@ -103,5 +108,13 @@ export class SubmissionsController {
     @Req() req: { user: { id: string } },
   ) {
     return this.submissionsService.devFastForwardLockDate(id, req.user.id);
+  }
+
+  @Get(":id/snapshots")
+  snapshots(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.submissionsService.getSnapshots(id, req.user.id);
   }
 }

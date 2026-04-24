@@ -39,6 +39,8 @@ export interface Campaign {
   rewardRatePer1k: number
   totalBudget: number
   budgetSpent: number
+  budgetReserved?: number
+  budgetAvailable?: number
   minPayoutThreshold: number
   maxPayoutPerClip?: number
   status: CampaignStatus
@@ -50,6 +52,7 @@ export interface Campaign {
   activeClippers: number
   totalViews: number
   totalSubmissions: number
+  openSubmissions?: number
 }
 
 export interface Submission {
@@ -79,6 +82,18 @@ export interface Submission {
   verificationStartedAt?: string
   autoApproveAt?: string
   lockDate?: string
+  lastViewCount?: number
+  lastScrapedAt?: string
+  postedAt?: string
+  postDeletedAt?: string
+  platformUsername?: string
+  pendingEarnings?: number
+}
+
+export interface SubmissionSnapshot {
+  capturedAt: string
+  viewCount: number
+  available: boolean
 }
 
 export type KycStatus = "not_started" | "in_progress" | "verified" | "rejected"

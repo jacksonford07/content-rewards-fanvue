@@ -152,6 +152,14 @@ export class CampaignsController {
     return this.campaignsService.togglePause(id, req.user.id);
   }
 
+  @Post(":id/complete")
+  complete(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.campaignsService.completeAndRefund(id, req.user.id);
+  }
+
   @Get(":id/transactions")
   getTransactions(
     @Param("id") id: string,

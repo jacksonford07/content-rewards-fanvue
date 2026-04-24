@@ -45,11 +45,47 @@ async function cleanSeed() {
       .where(inArray(schema.campaignBans.campaignId, seedCampaignIds));
     console.log("Deleted seed campaign bans");
 
+    // Delete snapshots for submissions tied to seed campaigns
+    const subsToSeedCampaigns = await db
+      .select({ id: schema.submissions.id })
+      .from(schema.submissions)
+      .where(inArray(schema.submissions.campaignId, seedCampaignIds));
+    const subIdsToSeedCampaigns = subsToSeedCampaigns.map((s) => s.id);
+    if (subIdsToSeedCampaigns.length > 0) {
+      await db
+        .delete(schema.submissionViewSnapshots)
+        .where(
+          inArray(
+            schema.submissionViewSnapshots.submissionId,
+            subIdsToSeedCampaigns,
+          ),
+        );
+      console.log("Deleted snapshots for submissions to seed campaigns");
+    }
+
     // Delete submissions TO seed campaigns (from any user)
     await db
       .delete(schema.submissions)
       .where(inArray(schema.submissions.campaignId, seedCampaignIds));
     console.log("Deleted submissions to seed campaigns");
+  }
+
+  // Delete snapshots for remaining submissions from seed users
+  const subsFromSeedUsers = await db
+    .select({ id: schema.submissions.id })
+    .from(schema.submissions)
+    .where(inArray(schema.submissions.fanId, seedUserIds));
+  const subIdsFromSeedUsers = subsFromSeedUsers.map((s) => s.id);
+  if (subIdsFromSeedUsers.length > 0) {
+    await db
+      .delete(schema.submissionViewSnapshots)
+      .where(
+        inArray(
+          schema.submissionViewSnapshots.submissionId,
+          subIdsFromSeedUsers,
+        ),
+      );
+    console.log("Deleted snapshots for submissions from seed users");
   }
 
   // Delete submissions FROM seed users (to any campaign)

@@ -10,6 +10,7 @@ export const QK = {
     mine: "submissions.mine",
     inbox: "submissions.inbox",
     byCampaign: "submissions.byCampaign",
+    snapshots: "submissions.snapshots",
   },
   notifications: {
     list: "notifications.list",

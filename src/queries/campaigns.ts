@@ -319,6 +319,25 @@ export function usePauseCampaign(
   })
 }
 
+export function useCompleteCampaign(
+  options?: TMutationOptions<{ refundedCents: number }, string>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.post<{ refundedCents: number }>(
+        `/campaigns/${id}/complete`,
+      )
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
 export function useDeleteCampaign(options?: TMutationOptions<unknown, string>) {
   const qc = useQueryClient()
   return useMutation({

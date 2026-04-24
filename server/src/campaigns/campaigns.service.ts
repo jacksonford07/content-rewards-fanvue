@@ -85,6 +85,15 @@ export class CampaignsService {
     const conditions = [
       eq(schema.campaigns.status, "active"),
       eq(schema.campaigns.isPrivate, false),
+      // Hide campaigns whose pool is fully committed (spent + reserved >=
+      // total). Clippers who'd submit here can't earn — FIFO priority is
+      // already locked in by earlier submissions.
+      sql`(${schema.campaigns.totalBudgetCents} - ${schema.campaigns.budgetSpentCents} - COALESCE((
+        SELECT SUM(${schema.submissions.pendingEarningsCents})
+        FROM ${schema.submissions}
+        WHERE ${schema.submissions.campaignId} = ${schema.campaigns.id}
+          AND ${schema.submissions.status} IN ('pending','approved','auto_approved')
+      ), 0)) > 0`,
     ];
 
     if (filters.viewerId) {
@@ -190,9 +199,10 @@ export class CampaignsService {
 
     const creatorsMap = new Map(creators.map((c) => [c.id, c]));
     const statsMap = new Map(submissionStats.map((s) => [s.campaignId, s]));
+    const reservedMap = await this.loadReservedMap(campaignIds);
 
     return {
-      data: rows.map((c) => this.serialize(c, creatorsMap, statsMap)),
+      data: rows.map((c) => this.serialize(c, creatorsMap, statsMap, reservedMap)),
       meta: {
         page,
         limit,
@@ -200,6 +210,34 @@ export class CampaignsService {
         totalPages: Math.max(1, Math.ceil(totalItems / limit)),
       },
     };
+  }
+
+  // Sum of pending-earnings across submissions that will still be paid
+  // from the campaign budget (pending/approved/auto_approved, not yet
+  // finalized). Deleted-post submissions stay in the reserve because the
+  // frozen view count is still paid at day-30 per spec.
+  private async loadReservedMap(
+    campaignIds: string[],
+  ): Promise<Map<string, number>> {
+    if (campaignIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        campaignId: schema.submissions.campaignId,
+        reservedCents: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
+      })
+      .from(schema.submissions)
+      .where(
+        and(
+          inArray(schema.submissions.campaignId, campaignIds),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+        ),
+      )
+      .groupBy(schema.submissions.campaignId);
+    return new Map(rows.map((r) => [r.campaignId, r.reservedCents]));
   }
 
   async getById(id: string) {
@@ -240,14 +278,16 @@ export class CampaignsService {
           sql<number>`count(distinct ${schema.submissions.fanId})::int`,
         totalViews:
           sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+        openSubmissions: sql<number>`count(*) filter (where ${schema.submissions.status} in ('pending','approved','auto_approved'))::int`,
       })
       .from(schema.submissions)
       .where(eq(schema.submissions.campaignId, campaign.id));
 
     const creatorsMap = new Map([[creator!.id, creator!]]);
     const statsMap = new Map([[campaign.id, stats!]]);
+    const reservedMap = await this.loadReservedMap([campaign.id]);
 
-    return this.serialize(campaign, creatorsMap, statsMap);
+    return this.serialize(campaign, creatorsMap, statsMap, reservedMap);
   }
 
   async topCampaigns(limit = 10, viewerId?: string) {
@@ -256,6 +296,12 @@ export class CampaignsService {
     const conditions = [
       eq(schema.campaigns.status, "active"),
       eq(schema.campaigns.isPrivate, false),
+      sql`(${schema.campaigns.totalBudgetCents} - ${schema.campaigns.budgetSpentCents} - COALESCE((
+        SELECT SUM(${schema.submissions.pendingEarningsCents})
+        FROM ${schema.submissions}
+        WHERE ${schema.submissions.campaignId} = ${schema.campaigns.id}
+          AND ${schema.submissions.status} IN ('pending','approved','auto_approved')
+      ), 0)) > 0`,
     ];
     if (viewerId) {
       conditions.push(not(eq(schema.campaigns.creatorId, viewerId)));
@@ -385,7 +431,7 @@ export class CampaignsService {
         allowedPlatforms: data.allowedPlatforms ?? [],
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: 0,
-        minPayoutThreshold: Math.round((data.minPayoutThreshold ?? 0) * 100),
+        minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
         maxPayoutPerClipCents: data.maxPayoutPerClip
           ? Math.round(data.maxPayoutPerClip * 100)
           : null,
@@ -457,9 +503,7 @@ export class CampaignsService {
       if (data.totalBudget !== undefined)
         updateData.totalBudgetCents = Math.round(data.totalBudget * 100);
       if (data.minPayoutThreshold !== undefined)
-        updateData.minPayoutThreshold = Math.round(
-          data.minPayoutThreshold * 100,
-        );
+        updateData.minPayoutThreshold = Math.round(data.minPayoutThreshold);
       if (data.maxPayoutPerClip !== undefined)
         updateData.maxPayoutPerClipCents = data.maxPayoutPerClip
           ? Math.round(data.maxPayoutPerClip * 100)
@@ -559,6 +603,84 @@ export class CampaignsService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Creator-triggered close. Refunds the unspent portion of the budget
+   * (total - spent) back to the creator's wallet and marks the campaign
+   * completed. Only allowed when there are no submissions left that could
+   * still claim the budget (nothing pending / approved / auto_approved).
+   */
+  async completeAndRefund(id: string, creatorId: string) {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, id))
+      .limit(1);
+
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+    if (campaign.status !== "active" && campaign.status !== "paused") {
+      throw new BadRequestException(
+        "Only active or paused campaigns can be completed",
+      );
+    }
+
+    const [openRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, id),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+        ),
+      );
+    if ((openRow?.count ?? 0) > 0) {
+      throw new BadRequestException(
+        "Cannot complete — there are still active submissions. Wait for all clippers to be paid out first.",
+      );
+    }
+
+    const refundCents = Math.max(
+      0,
+      campaign.totalBudgetCents - campaign.budgetSpentCents,
+    );
+    const now = new Date();
+
+    if (refundCents > 0) {
+      await this.db
+        .update(schema.users)
+        .set({
+          walletBalanceCents: sql`${schema.users.walletBalanceCents} + ${refundCents}`,
+        })
+        .where(eq(schema.users.id, creatorId));
+
+      await this.db.insert(schema.walletTransactions).values({
+        userId: creatorId,
+        campaignId: id,
+        type: "refund",
+        description: `Unused budget refunded from "${campaign.title}"`,
+        amountCents: refundCents,
+      });
+
+      await this.db.insert(schema.campaignTransactions).values({
+        campaignId: id,
+        type: "refund",
+        description: "Unused budget refunded to creator",
+        amountCents: refundCents,
+      });
+    }
+
+    await this.db
+      .update(schema.campaigns)
+      .set({ status: "completed", updatedAt: now })
+      .where(eq(schema.campaigns.id, id));
+
+    return { refundedCents: refundCents };
   }
 
   async togglePause(id: string, creatorId: string) {
@@ -673,9 +795,10 @@ export class CampaignsService {
 
     const creatorsMap = new Map([[creatorId, creator!]]);
     const statsMap = new Map(submissionStats.map((s) => [s.campaignId, s]));
+    const reservedMap = await this.loadReservedMap(campaignIds);
 
     return {
-      data: rows.map((c) => this.serialize(c, creatorsMap, statsMap)),
+      data: rows.map((c) => this.serialize(c, creatorsMap, statsMap, reservedMap)),
       meta: {
         page,
         limit,
@@ -791,11 +914,22 @@ export class CampaignsService {
     creatorsMap: Map<string, typeof schema.users.$inferSelect>,
     statsMap: Map<
       string,
-      { totalSubmissions: number; activeClippers: number; totalViews: number }
+      {
+        totalSubmissions: number;
+        activeClippers: number;
+        totalViews: number;
+        openSubmissions?: number;
+      }
     >,
+    reservedMap?: Map<string, number>,
   ) {
     const creator = creatorsMap.get(c.creatorId);
     const stats = statsMap.get(c.id);
+    const reservedCents = reservedMap?.get(c.id) ?? 0;
+    const availableCents = Math.max(
+      c.totalBudgetCents - c.budgetSpentCents - reservedCents,
+      0,
+    );
     return {
       id: c.id,
       creator: creator
@@ -818,7 +952,9 @@ export class CampaignsService {
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,
-      minPayoutThreshold: c.minPayoutThreshold / 100,
+      budgetReserved: reservedCents / 100,
+      budgetAvailable: availableCents / 100,
+      minPayoutThreshold: c.minPayoutThreshold,
       maxPayoutPerClip: c.maxPayoutPerClipCents
         ? c.maxPayoutPerClipCents / 100
         : undefined,
@@ -831,6 +967,7 @@ export class CampaignsService {
       activeClippers: stats?.activeClippers ?? 0,
       totalViews: stats?.totalViews ?? 0,
       totalSubmissions: stats?.totalSubmissions ?? 0,
+      openSubmissions: stats?.openSubmissions ?? 0,
     };
   }
 
@@ -848,7 +985,7 @@ export class CampaignsService {
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,
-      minPayoutThreshold: c.minPayoutThreshold / 100,
+      minPayoutThreshold: c.minPayoutThreshold,
       maxPayoutPerClip: c.maxPayoutPerClipCents
         ? c.maxPayoutPerClipCents / 100
         : undefined,

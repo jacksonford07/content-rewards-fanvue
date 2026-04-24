@@ -3,7 +3,6 @@ import { ArrowRight, Users, Eye, CurrencyDollar } from "@phosphor-icons/react"
 
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Progress } from "@/components/ui/progress"
 import { PlatformIcon } from "@/components/platform-icon"
 import type { Campaign } from "@/lib/types"
 import { formatCompactNumber, formatCurrency } from "@/lib/mock-data"
@@ -13,11 +12,20 @@ interface CampaignCardProps {
 }
 
 export function CampaignCard({ campaign }: CampaignCardProps) {
-  const budgetRemaining = campaign.totalBudget - campaign.budgetSpent
-  const budgetPct = Math.min(
-    100,
-    Math.round((campaign.budgetSpent / campaign.totalBudget) * 100)
-  )
+  const reserved = campaign.budgetReserved ?? 0
+  const available =
+    campaign.budgetAvailable ??
+    Math.max(campaign.totalBudget - campaign.budgetSpent - reserved, 0)
+  const spentPct = campaign.totalBudget
+    ? Math.min(100, Math.round((campaign.budgetSpent / campaign.totalBudget) * 100))
+    : 0
+  const reservedPct = campaign.totalBudget
+    ? Math.min(
+        100 - spentPct,
+        Math.round((reserved / campaign.totalBudget) * 100),
+      )
+    : 0
+  const committedPct = spentPct + reservedPct
 
   return (
     <Link to={`/campaigns/${campaign.id}`} className="group block h-full">
@@ -80,13 +88,29 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
               </span>
             </div>
             <span className="text-foreground font-medium tabular-nums">
-              {formatCurrency(budgetRemaining)} left
+              {formatCurrency(available)} left
             </span>
           </div>
-          <Progress value={budgetPct} className="h-1.5" />
-          <div className="flex w-full items-center justify-between text-[11px] text-muted-foreground">
-            <span>{budgetPct}% spent</span>
-            <span className="inline-flex items-center gap-1 font-medium text-primary">
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="absolute inset-y-0 left-0 bg-primary"
+              style={{ width: `${spentPct}%` }}
+            />
+            <div
+              className="absolute inset-y-0 bg-primary/40"
+              style={{ left: `${spentPct}%`, width: `${reservedPct}%` }}
+            />
+          </div>
+          <div className="flex w-full items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span className="min-w-0 truncate">
+              {committedPct}% committed
+              {reserved > 0 && (
+                <span className="text-primary/80">
+                  {" "}· {formatCurrency(reserved)} reserved
+                </span>
+              )}
+            </span>
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-medium text-primary">
               View brief
               <ArrowRight className="size-3" weight="bold" />
             </span>

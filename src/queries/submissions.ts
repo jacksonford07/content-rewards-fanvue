@@ -7,14 +7,21 @@ import type {
   TMutationOptions,
   TQueryOptions,
 } from "@/lib/query-types"
-import type { Submission } from "@/lib/types"
+import type { Submission, SubmissionSnapshot } from "@/lib/types"
 
-export type InboxTab = "pending" | "approved" | "verify" | "rejected" | "banned"
+export type InboxTab =
+  | "pending"
+  | "approved"
+  | "verify"
+  | "paid"
+  | "rejected"
+  | "banned"
 
 export interface InboxStats {
   pending: number
   approved: number
   verify: number
+  paid: number
   rejected: number
   banned: number
 }
@@ -70,17 +77,29 @@ export function useMySubmissionsStats(options?: TQueryOptions<MineStats>) {
 }
 
 export function useInboxSubmissions(
-  params: { tab: InboxTab; page: number; limit: number },
+  params: {
+    tab: InboxTab
+    page: number
+    limit: number
+    campaignId?: string
+  },
   options?: TQueryOptions<PaginatedResponse<Submission>>,
 ) {
   return useQuery({
-    queryKey: [QK.submissions.inbox, params.tab, params.page, params.limit] as const,
+    queryKey: [
+      QK.submissions.inbox,
+      params.tab,
+      params.page,
+      params.limit,
+      params.campaignId ?? null,
+    ] as const,
     queryFn: async () => {
       const qs = new URLSearchParams({
         tab: params.tab,
         page: String(params.page),
         limit: String(params.limit),
       })
+      if (params.campaignId) qs.set("campaignId", params.campaignId)
       const res = await api.get<PaginatedResponse<Submission>>(
         `/submissions/inbox?${qs.toString()}`,
       )
@@ -90,11 +109,22 @@ export function useInboxSubmissions(
   })
 }
 
-export function useInboxStats(options?: TQueryOptions<InboxStats>) {
+export function useInboxStats(
+  params?: { campaignId?: string },
+  options?: TQueryOptions<InboxStats>,
+) {
   return useQuery({
-    queryKey: [QK.submissions.inbox, "stats"] as const,
+    queryKey: [
+      QK.submissions.inbox,
+      "stats",
+      params?.campaignId ?? null,
+    ] as const,
     queryFn: async () => {
-      const res = await api.get<InboxStats>("/submissions/inbox/stats")
+      const qs = new URLSearchParams()
+      if (params?.campaignId) qs.set("campaignId", params.campaignId)
+      const res = await api.get<InboxStats>(
+        `/submissions/inbox/stats${qs.toString() ? `?${qs.toString()}` : ""}`,
+      )
       return res.data
     },
     ...options,
@@ -207,6 +237,22 @@ export function useVerifyViews(
       qc.invalidateQueries({ queryKey: [QK.campaigns.list] })
       options?.onSuccess?.(...args)
     },
+  })
+}
+
+export function useSubmissionSnapshots(
+  id: string,
+  options?: TQueryOptions<SubmissionSnapshot[]>,
+) {
+  return useQuery({
+    queryKey: [QK.submissions.snapshots, id] as const,
+    queryFn: async () => {
+      const res = await api.get<SubmissionSnapshot[]>(
+        `/submissions/${id}/snapshots`,
+      )
+      return res.data
+    },
+    ...options,
   })
 }
 

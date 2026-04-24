@@ -22,6 +22,7 @@ import {
   Globe,
   LinkSimple,
   Trophy,
+  X,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -29,7 +30,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -398,8 +398,18 @@ export function CreatorCampaignsPage() {
       ) : (
         <div className="space-y-4">
           {myCampaigns.map((c) => {
-            const pct = c.totalBudget
-              ? Math.round((c.budgetSpent / c.totalBudget) * 100)
+            const reserved = c.budgetReserved ?? 0
+            const available =
+              c.budgetAvailable ??
+              Math.max(c.totalBudget - c.budgetSpent - reserved, 0)
+            const spentPct = c.totalBudget
+              ? Math.min(100, Math.round((c.budgetSpent / c.totalBudget) * 100))
+              : 0
+            const reservedPct = c.totalBudget
+              ? Math.min(
+                  100 - spentPct,
+                  Math.round((reserved / c.totalBudget) * 100),
+                )
               : 0
             const isPreviewable =
               c.status !== "draft" && c.status !== "pending_budget"
@@ -443,7 +453,9 @@ export function CreatorCampaignsPage() {
                           <Badge
                             variant="outline"
                             className={
-                              c.status === "active"
+                              c.status === "active" && available <= 0
+                                ? "border-warning/40 bg-warning/10 text-warning"
+                                : c.status === "active"
                                 ? "border-success/40 bg-success/10 text-success"
                                 : c.status === "pending_budget"
                                 ? "border-primary/40 bg-primary/10 text-primary"
@@ -454,13 +466,16 @@ export function CreatorCampaignsPage() {
                                 : "border-border bg-muted text-muted-foreground"
                             }
                           >
-                            {c.status === "active" && (
+                            {c.status === "active" && available <= 0 ? (
+                              <Lock weight="fill" className="size-3" />
+                            ) : c.status === "active" ? (
                               <Lightning weight="fill" className="size-3" />
-                            )}
-                            {c.status === "draft" && (
+                            ) : c.status === "draft" ? (
                               <PencilSimple weight="fill" className="size-3" />
-                            )}
-                            {c.status === "pending_budget"
+                            ) : null}
+                            {c.status === "active" && available <= 0
+                              ? "Funds exhausted"
+                              : c.status === "pending_budget"
                               ? "Awaiting budget"
                               : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
                           </Badge>
@@ -531,7 +546,7 @@ export function CreatorCampaignsPage() {
                           )}
                           {c.status !== "draft" && c.status !== "pending_budget" && (
                             <DropdownMenuItem asChild>
-                              <Link to={`/creator/inbox?campaign=${c.id}`}>
+                              <Link to="/creator/inbox">
                                 <Tray className="size-4" />
                                 View submissions
                               </Link>
@@ -572,6 +587,12 @@ export function CreatorCampaignsPage() {
                                 )}
                                 {c.status === "paused" ? "Resume campaign" : "Pause campaign"}
                               </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link to={`/creator/campaigns/${c.id}/budget`}>
+                                  <X className="size-4" />
+                                  Complete & refund
+                                </Link>
+                              </DropdownMenuItem>
                             </>
                           )}
                           {(c.status === "draft" || c.status === "pending_budget") && c.budgetSpent === 0 && (
@@ -607,18 +628,32 @@ export function CreatorCampaignsPage() {
                     </div>
 
                     <div className="mt-4 space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">
-                          {formatCurrency(c.budgetSpent)} /{" "}
-                          {formatCurrency(c.totalBudget)} spent
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          <span className="font-medium text-foreground tabular-nums">
+                            {formatCurrency(available)}
+                          </span>{" "}
+                          available of {formatCurrency(c.totalBudget)}
                         </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
+                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                           {c.allowedPlatforms.map((p) => (
                             <PlatformIcon key={p} platform={p} className="size-3" />
                           ))}
                         </span>
                       </div>
-                      <Progress value={pct} className="h-1.5" />
+                      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="absolute inset-y-0 left-0 bg-primary"
+                          style={{ width: `${spentPct}%` }}
+                        />
+                        <div
+                          className="absolute inset-y-0 bg-primary/40"
+                          style={{
+                            left: `${spentPct}%`,
+                            width: `${reservedPct}%`,
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </CardContent>

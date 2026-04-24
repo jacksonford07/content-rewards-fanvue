@@ -5,10 +5,23 @@ import {
   XCircle,
   Prohibit,
   ArrowSquareOut,
+  ChartLineUp,
+  CurrencyDollar,
+  DotsThreeVertical,
   Eye,
   Clock,
   FastForward,
+  Warning,
 } from "@phosphor-icons/react"
+
+import { ViewTrendDialog } from "@/components/view-trend-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -68,11 +81,19 @@ const tabConfig: { key: TabKey; label: string }[] = [
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved" },
   { key: "verify", label: "Ready to verify" },
+  { key: "paid", label: "Paid" },
   { key: "rejected", label: "Rejected" },
   { key: "banned", label: "Banned" },
 ]
 
-const validTabs: TabKey[] = ["pending", "approved", "verify", "rejected", "banned"]
+const validTabs: TabKey[] = [
+  "pending",
+  "approved",
+  "verify",
+  "paid",
+  "rejected",
+  "banned",
+]
 
 export function CreatorInboxPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -106,6 +127,7 @@ export function CreatorInboxPage() {
     pending: 1,
     approved: 1,
     verify: 1,
+    paid: 1,
     rejected: 1,
     banned: 1,
   })
@@ -126,9 +148,11 @@ export function CreatorInboxPage() {
     pending: stats?.pending ?? 0,
     approved: stats?.approved ?? 0,
     verify: stats?.verify ?? 0,
+    paid: stats?.paid ?? 0,
     rejected: stats?.rejected ?? 0,
     banned: stats?.banned ?? 0,
   }
+
 
   const approveMutation = useApproveSubmission()
   const rejectMutation = useRejectSubmission()
@@ -396,11 +420,23 @@ function InboxRow({
   const [confirming, setConfirming] = useState(false)
   const [capModalOpen, setCapModalOpen] = useState(false)
   const [isReleasing, setIsReleasing] = useState(false)
+  const [trendOpen, setTrendOpen] = useState(false)
 
   const readOnly =
     submission.status === "approved" ||
     submission.status === "rejected" ||
     submission.status === "auto_approved"
+
+  const isTracking =
+    submission.status === "approved" ||
+    submission.status === "auto_approved" ||
+    submission.status === "pending"
+  const showLiveViews =
+    isTracking &&
+    submission.lastViewCount != null &&
+    submission.lastViewCount > 0
+  const canShowTrend =
+    (showLiveViews || submission.viewsAtDay30 != null) && !submission.isBanned
 
   const canFastForward =
     import.meta.env.DEV &&
@@ -471,24 +507,55 @@ function InboxRow({
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{submission.fanName}</p>
-                <p className="text-xs text-muted-foreground">
-                  @{submission.fanHandle} · {platformLabels[submission.platform]} · {timeAgo(submission.submittedAt)}
+                <p className="truncate text-xs text-muted-foreground">
+                  @{submission.fanHandle} · {platformLabels[submission.platform]}
+                  {submission.platformUsername
+                    ? ` · @${submission.platformUsername}`
+                    : ""}{" "}
+                  · {timeAgo(submission.submittedAt)}
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              {submission.viewsAtDay30 != null && (
+              {submission.viewsAtDay30 != null ? (
                 <span className="flex items-center gap-1">
                   <Eye className="size-3" />
-                  {formatCompactNumber(submission.viewsAtDay30)} views
+                  {formatCompactNumber(submission.viewsAtDay30)} final views
                 </span>
-              )}
+              ) : showLiveViews ? (
+                <span className="flex items-center gap-1">
+                  <Eye className="size-3" />
+                  {formatCompactNumber(submission.lastViewCount!)} live views
+                </span>
+              ) : null}
+              {isTracking && submission.pendingEarnings ? (
+                <span className="flex items-center gap-1 font-semibold text-primary">
+                  <CurrencyDollar weight="bold" className="size-3" />
+                  {formatCurrency(submission.pendingEarnings)} reserved
+                </span>
+              ) : null}
+              {submission.status === "paid" &&
+              submission.payoutAmount != null ? (
+                <span className="flex items-center gap-1 font-semibold text-success">
+                  <CurrencyDollar weight="bold" className="size-3" />
+                  {formatCurrency(submission.payoutAmount)} paid
+                </span>
+              ) : null}
               {showVerify && (
                 <span className="flex items-center gap-1 text-primary font-medium">
                   <CheckCircle className="size-3" />
                   Ready to verify
                 </span>
+              )}
+              {submission.postDeletedAt && (
+                <Badge
+                  variant="outline"
+                  className="gap-1.5 border-warning/40 bg-warning/10 text-warning"
+                >
+                  <Warning weight="fill" className="size-3" />
+                  Post deleted · count frozen
+                </Badge>
               )}
               {submission.status === "pending" && submission.autoApproveAt && (
                 <Badge variant="outline" className="gap-1.5 border-border/70 text-muted-foreground">
@@ -501,24 +568,32 @@ function InboxRow({
                 submission.lockDate && (
                   <span className="flex items-center gap-1">
                     <Clock className="size-3" />
-                    Verification ends in {timeUntil(submission.lockDate, true)}
+                    Day 30 in {timeUntil(submission.lockDate, true)}
                   </span>
                 )}
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 md:flex-col md:items-stretch lg:flex-row">
-            <Button variant="outline" size="sm" asChild className="flex-1">
-              <a
-                href={submission.postUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                View post
-                <ArrowSquareOut className="size-3.5" />
-              </a>
-            </Button>
+          <div className="flex items-center gap-2">
+            {!readOnly && !showVerify && (
+              <>
+                <Button size="sm" onClick={onApprove}>
+                  <CheckCircle weight="fill" className="size-4" />
+                  Approve
+                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="destructive" onClick={onReject}>
+                        <XCircle weight="fill" className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Reject submission</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </>
+            )}
 
             {canFastForward && (
               <TooltipProvider>
@@ -541,34 +616,44 @@ function InboxRow({
               </TooltipProvider>
             )}
 
-            {!readOnly && !showVerify && (
-              <div className="flex gap-2">
-                <Button size="sm" onClick={onApprove}>
-                  <CheckCircle weight="fill" className="size-4" />
-                  Approve
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="More actions"
+                >
+                  <DotsThreeVertical weight="bold" className="size-4" />
                 </Button>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button size="sm" variant="destructive" onClick={onReject}>
-                        <XCircle weight="fill" className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Reject submission</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button size="sm" variant="ghost" onClick={onBan}>
-                        <Prohibit weight="bold" className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Ban clipper from campaign</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canShowTrend && (
+                  <DropdownMenuItem onSelect={() => setTrendOpen(true)}>
+                    <ChartLineUp className="size-4" />
+                    View trend
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem asChild>
+                  <a
+                    href={submission.postUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ArrowSquareOut className="size-4" />
+                    Open original post
+                  </a>
+                </DropdownMenuItem>
+                {!readOnly && !showVerify && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onSelect={onBan}>
+                      <Prohibit weight="bold" className="size-4" />
+                      Ban clipper from campaign
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -712,6 +797,14 @@ function InboxRow({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {canShowTrend && (
+          <ViewTrendDialog
+            submission={submission}
+            open={trendOpen}
+            onOpenChange={setTrendOpen}
+          />
+        )}
       </CardContent>
     </Card>
   )
