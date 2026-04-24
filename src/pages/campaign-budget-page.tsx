@@ -317,14 +317,14 @@ export function CampaignBudgetPage() {
           <div className="flex items-center gap-2 text-primary/80">
             <Lock className="size-4" weight="fill" />
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Reserved
+              Pending
             </span>
           </div>
           <p className="mt-2 text-2xl font-bold tabular-nums">
             {formatCurrency(reserved)}
           </p>
           <p className="mt-1 text-[10px] text-muted-foreground">
-            Projected payouts from active clips
+            Already earned by active clips, paid on day 30
           </p>
         </Card>
         <Card className="border-border/60 bg-card/70 p-4 backdrop-blur">

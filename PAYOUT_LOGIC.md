@@ -12,14 +12,15 @@ The creator opens their inbox and hits **Approve** or **Reject**. If they don't 
 ## Step 3. We track the views
 Every 6 hours we call the platform API and check how many views the video has. We save the results in the database and build a chart.
 
-## Step 4. Money reservation
-As soon as we know the view count, we calculate the potential payout and **reserve** that amount from the campaign budget. Those dollars are temporarily "locked" for that specific clipper.
+## Step 4. Incremental earnings (the fair-share model)
+We don't reserve money upfront. Instead, every 6 hours we scrape new view counts for all active clips and grow each clipper's **earned-so-far** balance by whatever they added since the last scrape.
 
-**Important — first come, first served:**
-- Say the budget is $1000, and three clippers submit in this order: A ($300 earnings), B ($500), C ($800).
-- A gets $300 reserved, B gets $500 reserved. Only $200 is left for C (even though their views would have earned $800).
-- So whoever gets their video up first secures their share.
-- A fourth clipper arriving after the pool is empty gets nothing reserved.
+**Pro-rata fairness when the pool runs out:**
+Each 6-hour window has its own mini-budget: the remaining campaign pool (`total − already paid − already earned by everyone`). If the sum of all clips' new earnings this window is *less than* the remaining pool, everyone gets full credit. If it's *more* than the pool, everyone gets scaled down proportionally to how much they grew.
+
+Example: pool has $100 left, and this window three clips grew by $30, $40, $60 (total $130). Each gets `$100 × their_share`: $23, $31, $46. Everyone takes a proportional hit — nobody is "first in line".
+
+This means: clippers who rack up views at the same time share the squeeze together. Posting earlier doesn't give you priority; what matters is the time window each chunk of views lands in.
 
 ## Step 5. Creator protection
 When creating a campaign, the creator can set:
@@ -27,10 +28,12 @@ When creating a campaign, the creator can set:
 - **Max payout per clip** — ceiling for a single video (prevents one viral clip from eating the whole budget).
 
 ## Step 6. Payout on day 30
-30 days after the video was published we automatically:
-- Take the final view count.
-- Calculate the payout using the same rules.
-- Credit the money to the clipper's wallet.
+30 days after the video was **published** we automatically:
+- Do one last scrape + accrual window so the final view count is reflected.
+- Transfer the clipper's accumulated earnings to their wallet.
+- The clip moves from "earning" to "paid", and those dollars move from the campaign's "pending" bucket into "spent".
+
+Multiple clips from the same clipper each have their own 30-day clock starting from the publish date of each video.
 
 ## What if...
 
@@ -38,7 +41,7 @@ When creating a campaign, the creator can set:
 We pay out based on the views the video had at the moment it went down. The clipper still gets what they earned, but it stops growing.
 
 **...the budget runs out before day 30?**
-The campaign is automatically hidden from the public hub, and the creator sees a "Funds exhausted" badge. The actual money still gets paid out on day 30.
+The campaign is automatically hidden from the public hub, and the creator sees a "Funds exhausted" badge. Once the pool is exhausted, no new views earn anything — every clipper stops accruing together from that moment on. Already-accrued earnings still get paid out on day 30.
 
 **...the creator wants to add more budget?**
 "Add funds" button on the Budget management page. Funds go straight into escrow.
@@ -57,7 +60,7 @@ A campaign can land in the `completed` state in two ways:
 ### Typical timeline
 `draft → active → (optional: paused) → (optional: funds exhausted) → completed`
 
-**Funds exhausted** is a transient display state, not a separate DB status — it means `spent + reserved ≥ total budget`, so no new clippers can earn. The campaign is hidden from the public hub and tagged with a "Funds exhausted" badge until the last 30-day window closes and everyone is paid.
+**Funds exhausted** is a transient display state, not a separate DB status — it means `spent + pending ≥ total budget`, so no new earnings can accrue. The campaign is hidden from the public hub and tagged with a "Funds exhausted" badge until the last 30-day window closes and everyone is paid.
 
 ### Suggested creator flow for winding down early
 If the creator wants to end a campaign that still has free budget and new clippers keep joining:
@@ -66,9 +69,9 @@ If the creator wants to end a campaign that still has free budget and new clippe
 3. Hit **Complete campaign** — leftover budget is refunded back to the wallet.
 
 ## What the creator sees
-- **Budget management**: 4 cards — Total / Spent / Reserved / Available — plus **Add funds** and **Complete campaign** buttons.
-- **Campaign list**: how much is available out of the total budget + a progress bar (solid = paid out, translucent = reserved). Kebab menu gives **Pause / Resume** and **Complete & refund**.
-- **Inbox**: one row per submission. For active clips — live view count + **`$X reserved`** (what this clipper will be paid if views stay put). For paid clips — **`$Y paid`** (the actual payout that was released). Tabs: Pending · Approved · Ready to verify · Paid · Rejected · Banned.
+- **Budget management**: 4 cards — Total / Spent / Pending / Available — plus **Add funds** and **Complete campaign** buttons.
+- **Campaign list**: how much is available out of the total budget + a progress bar (solid = paid out, translucent = pending). Kebab menu gives **Pause / Resume** and **Complete & refund**.
+- **Inbox**: one row per submission. For active clips — live view count + **`$X earned`** (what this clipper has accumulated so far). For paid clips — **`$Y paid`** (the actual payout that was released). Tabs: Pending · Approved · Ready to verify · Paid · Rejected · Banned.
 
 ## What the clipper sees
 - For each submission: current views, current projected earnings, and a "paid at day 30" countdown.

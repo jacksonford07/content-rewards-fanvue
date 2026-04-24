@@ -532,7 +532,7 @@ function InboxRow({
               {isTracking && submission.pendingEarnings ? (
                 <span className="flex items-center gap-1 font-semibold text-primary">
                   <CurrencyDollar weight="bold" className="size-3" />
-                  {formatCurrency(submission.pendingEarnings)} reserved
+                  {formatCurrency(submission.pendingEarnings)} earned
                 </span>
               ) : null}
               {submission.status === "paid" &&

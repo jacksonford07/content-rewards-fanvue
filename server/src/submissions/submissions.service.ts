@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
@@ -183,9 +183,6 @@ export class SubmissionsService {
         lastScrapedAt: now,
         updatedAt: now,
       };
-      if (result.available && typeof result.viewCount === "number") {
-        update.lastViewCount = result.viewCount;
-      }
       if (result.postedAt) {
         update.postedAt = result.postedAt;
         update.lockDate = new Date(
@@ -201,7 +198,13 @@ export class SubmissionsService {
         .set(update)
         .where(eq(schema.submissions.id, submission.id));
 
-      await this.recomputeCampaignReservations(submission.campaignId);
+      // Feed the scrape into the campaign-wide accrual so this fresh
+      // submission takes its pro-rata share of whatever pool is left.
+      if (result.available && typeof result.viewCount === "number") {
+        await this.applyCampaignAccrual(submission.campaignId, [
+          { submissionId: submission.id, newViewCount: result.viewCount },
+        ]);
+      }
     } catch (err) {
       this.logger.error(
         `Initial scrape failed for submission ${submission.id}: ${String(err)}`,
@@ -223,13 +226,22 @@ export class SubmissionsService {
   }
 
   /**
-   * Allocate `pending_earnings_cents` across a campaign's active submissions
-   * in FIFO (earliest-submitted first) order, capped by the remaining pool
-   * (totalBudget - spent). Once the pool is exhausted, later submissions get
-   * whatever is left and anyone below them gets 0. Total reserved + spent is
-   * guaranteed to never exceed the campaign's total budget.
+   * Time-window accrual: takes the new view counts each cron cycle and grows
+   * each submission's `pending_earnings_cents` by its *delta earnings* (what
+   * it would have added since last scrape). When the sum of deltas across
+   * the campaign exceeds the remaining pool (`totalBudget − spent − already
+   * accrued`), every growing submission gets its share cut proportionally to
+   * how much it grew this window. Nobody is "first in line" — clippers who
+   * happen to rack up views in the same window miss out together.
+   *
+   * Pass `scrapes` — one entry per submission whose `last_view_count` changed
+   * this window. The new view counts are written here along with the accrual.
    */
-  async recomputeCampaignReservations(campaignId: string): Promise<void> {
+  async applyCampaignAccrual(
+    campaignId: string,
+    scrapes: { submissionId: string; newViewCount: number }[],
+  ): Promise<void> {
+    if (scrapes.length === 0) return;
     const [campaign] = await this.db
       .select()
       .from(schema.campaigns)
@@ -237,7 +249,7 @@ export class SubmissionsService {
       .limit(1);
     if (!campaign) return;
 
-    const subs = await this.db
+    const activeSubs = await this.db
       .select()
       .from(schema.submissions)
       .where(
@@ -249,59 +261,73 @@ export class SubmissionsService {
             "auto_approved",
           ]),
         ),
-      )
-      .orderBy(asc(schema.submissions.createdAt));
+      );
 
-    let pool = Math.max(
+    // Remaining pool capacity = total budget minus what's already been paid
+    // AND already accrued across all active submissions. Capacity shrinks as
+    // deltas get applied.
+    const alreadyAccrued = activeSubs.reduce(
+      (sum, s) => sum + s.pendingEarningsCents,
       0,
-      campaign.totalBudgetCents - campaign.budgetSpentCents,
     );
+    let remainingPool = Math.max(
+      0,
+      campaign.totalBudgetCents - campaign.budgetSpentCents - alreadyAccrued,
+    );
+
+    const scrapeMap = new Map(scrapes.map((s) => [s.submissionId, s]));
+    // Compute each growing sub's desired delta (how much earnings it *would*
+    // add if the pool were infinite).
+    type Growth = {
+      sub: typeof schema.submissions.$inferSelect;
+      newViews: number;
+      delta: number;
+    };
+    const growths: Growth[] = [];
+    for (const sub of activeSubs) {
+      const scrape = scrapeMap.get(sub.id);
+      if (!scrape) continue;
+      const theoretical = calcPendingEarningsCents(
+        scrape.newViewCount,
+        campaign,
+      );
+      const delta = Math.max(0, theoretical - sub.pendingEarningsCents);
+      if (delta === 0) continue;
+      growths.push({ sub, newViews: scrape.newViewCount, delta });
+    }
+
+    const totalDelta = growths.reduce((sum, g) => sum + g.delta, 0);
     const now = new Date();
-    for (const s of subs) {
-      const desired = calcPendingEarningsCents(s.lastViewCount, campaign);
-      const capped = Math.min(desired, pool);
-      if (capped !== s.pendingEarningsCents) {
+
+    // Apply pro-rata cut if the pool can't cover everyone this window.
+    for (const g of growths) {
+      let allocated = g.delta;
+      if (totalDelta > remainingPool) {
+        // Integer-safe proportional split (floor avoids overshooting pool).
+        allocated = Math.floor((g.delta * remainingPool) / totalDelta);
+      }
+      await this.db
+        .update(schema.submissions)
+        .set({
+          pendingEarningsCents: g.sub.pendingEarningsCents + allocated,
+          lastViewCount: g.newViews,
+          updatedAt: now,
+        })
+        .where(eq(schema.submissions.id, g.sub.id));
+    }
+
+    // Write view counts for non-growing subs too (so snapshots match).
+    for (const sub of activeSubs) {
+      const scrape = scrapeMap.get(sub.id);
+      if (!scrape) continue;
+      if (growths.find((g) => g.sub.id === sub.id)) continue;
+      if (scrape.newViewCount !== sub.lastViewCount) {
         await this.db
           .update(schema.submissions)
-          .set({ pendingEarningsCents: capped, updatedAt: now })
-          .where(eq(schema.submissions.id, s.id));
+          .set({ lastViewCount: scrape.newViewCount, updatedAt: now })
+          .where(eq(schema.submissions.id, sub.id));
       }
-      pool = Math.max(0, pool - capped);
     }
-  }
-
-  /**
-   * FIFO-ceiling for a given submission: the maximum pending earnings it can
-   * ever reach while higher-priority (earlier) submissions keep their current
-   * reservations. Used by the cron to skip wasted scrapes on submissions
-   * whose share of the pool is already taken by earlier clippers.
-   */
-  async getReservationCeilingCents(
-    submission: typeof schema.submissions.$inferSelect,
-    campaign: typeof schema.campaigns.$inferSelect,
-  ): Promise<number> {
-    const [row] = await this.db
-      .select({
-        sum: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
-      })
-      .from(schema.submissions)
-      .where(
-        and(
-          eq(schema.submissions.campaignId, submission.campaignId),
-          inArray(schema.submissions.status, [
-            "pending",
-            "approved",
-            "auto_approved",
-          ]),
-          sql`${schema.submissions.createdAt} < ${submission.createdAt}`,
-        ),
-      );
-    const earlierReserved = row?.sum ?? 0;
-    const poolTotal = Math.max(
-      0,
-      campaign.totalBudgetCents - campaign.budgetSpentCents,
-    );
-    return Math.max(0, poolTotal - earlierReserved);
   }
 
   async mine(
@@ -551,9 +577,7 @@ export class SubmissionsService {
       actionUrl: "/submissions?tab=rejected",
     });
 
-    // Reservation freed — let the next in line take the slack.
-    await this.recomputeCampaignReservations(submission.campaignId);
-
+    // Accrual freed — next cron window will see a larger pool automatically.
     return { success: true };
   }
 
@@ -580,8 +604,6 @@ export class SubmissionsService {
         userId: submission.fanId,
       })
       .onConflictDoNothing();
-
-    await this.recomputeCampaignReservations(submission.campaignId);
 
     return { success: true };
   }
@@ -644,34 +666,21 @@ export class SubmissionsService {
     campaign: typeof schema.campaigns.$inferSelect,
     views: number,
   ) {
-    // Use same calc as pending earnings (threshold + per-clip cap) …
-    let payoutCents = calcPendingEarningsCents(views, campaign);
-
-    // …then cap by remaining pool AFTER subtracting other active
-    // reservations (FIFO priority — earlier clippers own their share).
-    const [otherReserved] = await this.db
-      .select({
-        sum: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
-      })
-      .from(schema.submissions)
-      .where(
-        and(
-          eq(schema.submissions.campaignId, submission.campaignId),
-          inArray(schema.submissions.status, [
-            "pending",
-            "approved",
-            "auto_approved",
-          ]),
-          sql`${schema.submissions.id} <> ${submission.id}`,
-        ),
-      );
-    const availableForMe =
-      campaign.totalBudgetCents -
-      campaign.budgetSpentCents -
-      (otherReserved?.sum ?? 0);
-    if (payoutCents > availableForMe) {
-      payoutCents = Math.max(availableForMe, 0);
+    // Run one last accrual window so day-30 earnings reflect the final view
+    // count (subject to the campaign pool like every other window).
+    if (views !== submission.lastViewCount) {
+      await this.applyCampaignAccrual(submission.campaignId, [
+        { submissionId: submission.id, newViewCount: views },
+      ]);
     }
+
+    // Re-read the now-up-to-date accrued amount.
+    const [fresh] = await this.db
+      .select({ pending: schema.submissions.pendingEarningsCents })
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submission.id))
+      .limit(1);
+    const payoutCents = fresh?.pending ?? 0;
 
     // Update submission — clear pending earnings since they've been settled
     await this.db
@@ -729,11 +738,6 @@ export class SubmissionsService {
         actionUrl: "/wallet",
       });
     }
-
-    // This submission's reservation moved from pending to spent. Recompute
-    // FIFO-capped reservations for the remaining active submissions so any
-    // slack from rounding / per-clip caps goes to the next in line.
-    await this.recomputeCampaignReservations(submission.campaignId);
 
     // Check if campaign budget is exhausted → mark completed
     await this.checkCampaignCompletion(submission.campaignId);

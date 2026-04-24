@@ -106,7 +106,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
               {committedPct}% committed
               {reserved > 0 && (
                 <span className="text-primary/80">
-                  {" "}· {formatCurrency(reserved)} reserved
+                  {" "}· {formatCurrency(reserved)} pending
                 </span>
               )}
             </span>

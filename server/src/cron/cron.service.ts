@@ -135,8 +135,13 @@ export class CronService {
     let errors = 0;
     let skippedAge = 0;
     let skippedFresh = 0;
-    let skippedFull = 0;
-    const touchedCampaigns = new Set<string>();
+    // scrapes that brought new view data, grouped by campaign — fed into the
+    // campaign-wide accrual at the end so the pool splits fairly across all
+    // clips that grew this window.
+    const scrapesByCampaign = new Map<
+      string,
+      { submissionId: string; newViewCount: number }[]
+    >();
 
     for (const sub of tracked) {
       const anchor = sub.postedAt ?? sub.createdAt;
@@ -150,25 +155,6 @@ export class CronService {
       const lastScraped = sub.lastScrapedAt?.getTime() ?? 0;
       if (now.getTime() - lastScraped < sixHoursMs) {
         skippedFresh++;
-        continue;
-      }
-
-      const [campaign] = await this.db
-        .select()
-        .from(schema.campaigns)
-        .where(eq(schema.campaigns.id, sub.campaignId))
-        .limit(1);
-      if (!campaign) continue;
-
-      // FIFO priority: skip scraping if earlier clippers already own the
-      // campaign pool — we couldn't grow this submission's reservation even
-      // if its view count went up, so the API call would be wasted.
-      const ceiling = await this.submissions.getReservationCeilingCents(
-        sub,
-        campaign,
-      );
-      if (ceiling <= sub.pendingEarningsCents) {
-        skippedFull++;
         continue;
       }
 
@@ -187,12 +173,6 @@ export class CronService {
           updatedAt: now,
         };
 
-        let viewsChanged = false;
-        if (result.available && typeof result.viewCount === "number") {
-          if (result.viewCount !== sub.lastViewCount) viewsChanged = true;
-          update.lastViewCount = result.viewCount;
-        }
-
         if (!sub.postedAt && result.postedAt) {
           update.postedAt = result.postedAt;
           // Realign lockDate to postedAt + 30d (overrides creator-decision anchor)
@@ -210,7 +190,20 @@ export class CronService {
           .set(update)
           .where(eq(schema.submissions.id, sub.id));
 
-        if (viewsChanged) touchedCampaigns.add(sub.campaignId);
+        // Queue for accrual if the view count actually grew — same delta
+        // semantics as every other clip that grew this window.
+        if (
+          result.available &&
+          typeof result.viewCount === "number" &&
+          result.viewCount > sub.lastViewCount
+        ) {
+          const arr = scrapesByCampaign.get(sub.campaignId) ?? [];
+          arr.push({
+            submissionId: sub.id,
+            newViewCount: result.viewCount,
+          });
+          scrapesByCampaign.set(sub.campaignId, arr);
+        }
 
         if (!result.available) {
           // Mark deleted only on two consecutive unavailable snapshots
@@ -242,9 +235,10 @@ export class CronService {
       }
     }
 
-    // Recompute FIFO-capped reservations once per campaign touched this run.
-    for (const campaignId of touchedCampaigns) {
-      await this.submissions.recomputeCampaignReservations(campaignId);
+    // Apply accruals once per campaign: each campaign's pool is split
+    // pro-rata across all submissions that grew this window.
+    for (const [campaignId, scrapes] of scrapesByCampaign) {
+      await this.submissions.applyCampaignAccrual(campaignId, scrapes);
     }
 
     return {
@@ -253,7 +247,6 @@ export class CronService {
       errors,
       skippedAge,
       skippedFresh,
-      skippedFull,
       total: tracked.length,
     };
   }
