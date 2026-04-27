@@ -56,12 +56,27 @@ export class TikTokScraperService {
         "playCount",
       ]);
       const createdTs = pickNumber(item, ["createTime", "create_time"]);
+      // TikTok exposes several CDN URLs per video. The `playAddr` /
+      // `downloadAddr` / first entries in `bitrateInfo[].UrlList` are
+      // session-bound and return 403 to outside callers. The
+      // `tiktok.com/aweme/v1/play/?...` URL (usually the LAST item in
+      // `UrlList`) is a public play endpoint that streams the actual mp4
+      // bytes — that's what we want for ffmpeg to read.
+      const videoUrl =
+        pickAwemePlayUrl(item) ??
+        pickString(item, [
+          "video.playAddr",
+          "video.downloadAddr",
+          "video.bitrateInfo.0.PlayAddr.UrlList.0",
+        ]) ??
+        undefined;
 
       return {
         viewCount: views,
         available: views != null,
         postedAt:
           createdTs != null ? new Date(createdTs * 1000) : undefined,
+        videoUrl,
       };
     } catch (err) {
       this.logger.error(`TikTok scrape error for ${videoId}: ${String(err)}`);
@@ -84,21 +99,34 @@ function extractTikTokItem(
   return null;
 }
 
+/**
+ * Walks `video.bitrateInfo[].PlayAddr.UrlList[]` looking for the
+ * tiktok.com/aweme/v1/play URL — that's the only CDN endpoint that
+ * doesn't 403 outside callers.
+ */
+function pickAwemePlayUrl(item: Record<string, unknown>): string | null {
+  const video = item.video as Record<string, unknown> | undefined;
+  const bitrate = video?.bitrateInfo as unknown[] | undefined;
+  if (!Array.isArray(bitrate)) return null;
+  for (const br of bitrate) {
+    const playAddr = (br as Record<string, unknown>)?.PlayAddr as
+      | Record<string, unknown>
+      | undefined;
+    const urls = playAddr?.UrlList as unknown[] | undefined;
+    if (!Array.isArray(urls)) continue;
+    for (const u of urls) {
+      if (typeof u === "string" && u.includes("/aweme/v1/play")) return u;
+    }
+  }
+  return null;
+}
+
 function pickNumber(
   obj: Record<string, unknown>,
   paths: string[],
 ): number | null {
   for (const path of paths) {
-    const parts = path.split(".");
-    let cur: unknown = obj;
-    for (const p of parts) {
-      if (cur && typeof cur === "object" && p in (cur as object)) {
-        cur = (cur as Record<string, unknown>)[p];
-      } else {
-        cur = undefined;
-        break;
-      }
-    }
+    const cur = walkPath(obj, path);
     if (typeof cur === "number" && Number.isFinite(cur)) return cur;
     if (typeof cur === "string" && cur.trim() !== "") {
       const n = Number(cur);
@@ -106,4 +134,32 @@ function pickNumber(
     }
   }
   return null;
+}
+
+function pickString(
+  obj: Record<string, unknown>,
+  paths: string[],
+): string | null {
+  for (const path of paths) {
+    const cur = walkPath(obj, path);
+    if (typeof cur === "string" && cur.trim() !== "") return cur;
+  }
+  return null;
+}
+
+function walkPath(obj: unknown, path: string): unknown {
+  const parts = path.split(".");
+  let cur: unknown = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) {
+      const idx = Number(p);
+      cur = Number.isFinite(idx) ? cur[idx] : undefined;
+    } else if (typeof cur === "object" && p in (cur as object)) {
+      cur = (cur as Record<string, unknown>)[p];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
 }

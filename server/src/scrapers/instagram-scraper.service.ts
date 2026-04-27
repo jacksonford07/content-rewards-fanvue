@@ -58,11 +58,15 @@ export class InstagramScraperService {
       const username =
         typeof owner?.username === "string" ? owner.username : undefined;
 
+      const videoUrl =
+        typeof body.video_url === "string" ? body.video_url : undefined;
+
       return {
         viewCount,
         available: true,
         postedAt,
         platformUsername: username,
+        videoUrl,
       };
     } catch (err) {
       this.logger.error(`Instagram scrape error for ${url}: ${String(err)}`);

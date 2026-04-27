@@ -6,7 +6,6 @@ import {
   Prohibit,
   ArrowSquareOut,
   ChartLineUp,
-  CurrencyDollar,
   DotsThreeVertical,
   Eye,
   Clock,
@@ -31,7 +30,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -116,7 +114,6 @@ export function CreatorInboxPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
-  const [autoApprove, setAutoApprove] = useState(false)
   const [rejectOpen, setRejectOpen] = useState<Submission | null>(null)
   const [banOpen, setBanOpen] = useState<Submission | null>(null)
   const [rejectReason, setRejectReason] = useState("")
@@ -226,21 +223,6 @@ export function CreatorInboxPage() {
       <PageHeader
         title="Submission inbox"
         description="Review clips submitted to your campaigns. 48h auto-approve window active."
-        actions={
-          <div className="flex items-center gap-2 rounded-full border border-border/70 bg-card/60 px-3 py-2">
-            <Switch
-              checked={autoApprove}
-              onCheckedChange={setAutoApprove}
-              id="auto-approve"
-            />
-            <Label
-              htmlFor="auto-approve"
-              className="cursor-pointer text-xs text-muted-foreground"
-            >
-              Auto-approve future clean submissions
-            </Label>
-          </div>
-        }
         className="mb-6"
       />
 
@@ -530,15 +512,13 @@ function InboxRow({
                 </span>
               ) : null}
               {isTracking && submission.pendingEarnings ? (
-                <span className="flex items-center gap-1 font-semibold text-primary">
-                  <CurrencyDollar weight="bold" className="size-3" />
+                <span className="font-semibold text-primary">
                   {formatCurrency(submission.pendingEarnings)} earned
                 </span>
               ) : null}
               {submission.status === "paid" &&
               submission.payoutAmount != null ? (
-                <span className="flex items-center gap-1 font-semibold text-success">
-                  <CurrencyDollar weight="bold" className="size-3" />
+                <span className="font-semibold text-success">
                   {formatCurrency(submission.payoutAmount)} paid
                 </span>
               ) : null}
@@ -557,6 +537,38 @@ function InboxRow({
                   Post deleted · count frozen
                 </Badge>
               )}
+              {submission.aiReviewResult === "clean" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className="gap-1.5 border-success/40 bg-success/10 text-success"
+                    >
+                      <CheckCircle weight="fill" className="size-3" />
+                      AI: clean
+                    </Badge>
+                  </TooltipTrigger>
+                  {submission.aiNotes && (
+                    <TooltipContent>{submission.aiNotes}</TooltipContent>
+                  )}
+                </Tooltip>
+              )}
+              {submission.aiReviewResult === "flagged" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className="gap-1.5 border-warning/40 bg-warning/10 text-warning"
+                    >
+                      <Warning weight="fill" className="size-3" />
+                      AI: flagged
+                    </Badge>
+                  </TooltipTrigger>
+                  {submission.aiNotes && (
+                    <TooltipContent>{submission.aiNotes}</TooltipContent>
+                  )}
+                </Tooltip>
+              )}
               {submission.status === "pending" && submission.autoApproveAt && (
                 <Badge variant="outline" className="gap-1.5 border-border/70 text-muted-foreground">
                   <Clock className="size-3" />
@@ -568,7 +580,7 @@ function InboxRow({
                 submission.lockDate && (
                   <span className="flex items-center gap-1">
                     <Clock className="size-3" />
-                    Day 30 in {timeUntil(submission.lockDate, true)}
+                    Views lock in {timeUntil(submission.lockDate, true)}
                   </span>
                 )}
             </div>

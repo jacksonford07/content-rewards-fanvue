@@ -6,13 +6,20 @@ A creator sets up a campaign with a budget (e.g. $1000) and a rate (e.g. $3 per 
 ## Step 1. Clipper submits a video
 The clipper pastes the URL. We immediately hit the platform API to check the current view count. The 30-day timer starts from this moment.
 
-## Step 2. Creator reviews
-The creator opens their inbox and hits **Approve** or **Reject**. If they don't react within 48 hours, the submission auto-approves.
+## Step 2. AI content check (face-likeness)
+Right after submit, the backend pulls the clip's video file from the platform's API and samples ~5 keyframes from the first 25 seconds via FFmpeg (1 frame every 5 seconds, scaled down). It also samples ~4 keyframes from the campaign's **source video** (cached per campaign so it's only extracted once). Both sets — labelled "Source @ Ns" and "Clip @ Ns" — are sent to Claude Sonnet vision in a single call. Claude is asked one focused question: **is the person shown in the clip the same person shown in the source?** The source video is usually much longer than the clip, so the timestamps don't line up — face likeness is the anchor.
 
-## Step 3. We track the views
+Claude returns a verdict (**clean** or **flagged**) plus a one-sentence reason, stored on the submission and shown to the creator in the inbox as a badge with a tooltip. "Flagged" doesn't reject — it just signals the creator to take a closer look manually before approving.
+
+If the platform's API doesn't expose a direct video URL (e.g. YouTube), or the source video can't be reached, the clip is auto-flagged for human review.
+
+## Step 3. Creator reviews
+The creator opens their inbox and hits **Approve** or **Reject**. The AI badge from Step 2 is visible right next to the clip so the creator has immediate context. If they don't react within 48 hours, the submission auto-approves.
+
+## Step 4. We track the views
 Every 6 hours we call the platform API and check how many views the video has. We save the results in the database and build a chart.
 
-## Step 4. Incremental earnings (the fair-share model)
+## Step 5. Incremental earnings (the fair-share model)
 We don't reserve money upfront. Instead, every 6 hours we scrape new view counts for all active clips and grow each clipper's **earned-so-far** balance by whatever they added since the last scrape.
 
 **Pro-rata fairness when the pool runs out:**
@@ -22,12 +29,12 @@ Example: pool has $100 left, and this window three clips grew by $30, $40, $60 (
 
 This means: clippers who rack up views at the same time share the squeeze together. Posting earlier doesn't give you priority; what matters is the time window each chunk of views lands in.
 
-## Step 5. Creator protection
+## Step 6. Creator protection
 When creating a campaign, the creator can set:
 - **Min views** — below this view threshold, no payout (filters out dead videos).
 - **Max payout per clip** — ceiling for a single video (prevents one viral clip from eating the whole budget).
 
-## Step 6. Payout on day 30
+## Step 7. Payout on day 30
 30 days after the video was **published** we automatically:
 - Do one last scrape + accrual window so the final view count is reflected.
 - Transfer the clipper's accumulated earnings to their wallet.

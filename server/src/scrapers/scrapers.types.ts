@@ -5,6 +5,9 @@ export interface ScrapeResult {
   available: boolean;
   postedAt?: Date;
   platformUsername?: string;
+  /** Direct CDN URL of the playable video file, if the API exposes it.
+   * Used by AI verification to pull keyframes — usually short-lived. */
+  videoUrl?: string;
 }
 
 export function detectPlatform(url: string): Platform | null {

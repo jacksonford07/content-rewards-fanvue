@@ -9,6 +9,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
+import { AiVerificationService } from "../ai-verification/ai-verification.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
@@ -97,6 +98,7 @@ export class SubmissionsService {
     @Inject(DB) private db: Database,
     private notifications: NotificationsService,
     private scrapers: ScrapersService,
+    private aiVerification: AiVerificationService,
   ) {}
 
   async submit(
@@ -153,6 +155,11 @@ export class SubmissionsService {
     // A failure here must not fail the submission — cron will retry.
     await this.initialScrape(submission!);
 
+    // AI content review runs in the background — it can take 10–20s once we
+    // pull the video and ask Claude. We don't block the response; the
+    // creator will see the verdict in the inbox as soon as it lands.
+    void this.runAiVerification(submission!.id, submission!.postUrl, campaign);
+
     // Notify creator
     await this.notifications.create({
       userId: campaign.creatorId,
@@ -208,6 +215,40 @@ export class SubmissionsService {
     } catch (err) {
       this.logger.error(
         `Initial scrape failed for submission ${submission.id}: ${String(err)}`,
+      );
+    }
+  }
+
+  private async runAiVerification(
+    submissionId: string,
+    postUrl: string,
+    campaign: typeof schema.campaigns.$inferSelect,
+  ): Promise<void> {
+    try {
+      const outcome = await this.aiVerification.verify({
+        clipUrl: postUrl,
+        campaign: {
+          id: campaign.id,
+          title: campaign.title,
+          description: campaign.description,
+          requirementsText: campaign.requirementsText,
+          sourceContentUrl: campaign.sourceContentUrl,
+          sourceThumbnailUrl: campaign.sourceThumbnailUrl,
+        },
+      });
+      if (!outcome) return; // Service is disabled or hit a transient issue.
+
+      await this.db
+        .update(schema.submissions)
+        .set({
+          aiReviewResult: outcome.result,
+          aiNotes: outcome.notes || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.submissions.id, submissionId));
+    } catch (err) {
+      this.logger.error(
+        `AI verification failed for submission ${submissionId}: ${String(err)}`,
       );
     }
   }
@@ -918,6 +959,8 @@ export class SubmissionsService {
         pendingEarnings: s.pendingEarningsCents
           ? s.pendingEarningsCents / 100
           : 0,
+        aiReviewResult: s.aiReviewResult ?? undefined,
+        aiNotes: s.aiNotes ?? undefined,
       };
     });
   }

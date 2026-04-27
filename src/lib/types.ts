@@ -88,6 +88,8 @@ export interface Submission {
   postDeletedAt?: string
   platformUsername?: string
   pendingEarnings?: number
+  aiReviewResult?: "clean" | "flagged"
+  aiNotes?: string
 }
 
 export interface SubmissionSnapshot {

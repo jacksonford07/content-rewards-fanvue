@@ -1,3 +1,9 @@
+import { config as loadDotenv } from "dotenv";
+// Load .env BEFORE Nest's ConfigModule with override:true. Otherwise stale
+// values exported in the developer's shell (e.g. ANTHROPIC_API_KEY in
+// .zshrc) would silently shadow what's actually in server/.env.
+loadDotenv({ override: true });
+
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { AppModule } from "./app.module.js";

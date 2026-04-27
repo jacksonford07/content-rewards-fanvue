@@ -2,12 +2,18 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+
+export interface SourceKeyframe {
+  atSeconds: number;
+  base64: string;
+}
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +86,10 @@ export const campaigns = pgTable("campaigns", {
     .notNull(),
   goesLiveAt: timestamp("goes_live_at", { withTimezone: true }),
   endsAt: timestamp("ends_at", { withTimezone: true }),
+  // Pre-extracted keyframes from sourceContentUrl, base64 jpegs. Populated
+  // on first AI verification for the campaign and re-used afterwards so we
+  // hit Drive (or whichever host) at most once per source URL.
+  sourceKeyframes: jsonb("source_keyframes").$type<SourceKeyframe[]>(),
 });
 
 // ─── Submissions ─────────────────────────────────────────────────────────────

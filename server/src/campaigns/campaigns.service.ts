@@ -490,8 +490,14 @@ export class CampaignsService {
 
     // All fields editable for draft/pending_budget campaigns
     if (isDraftLike) {
-      if (data.sourceContentUrl !== undefined)
+      if (data.sourceContentUrl !== undefined) {
         updateData.sourceContentUrl = data.sourceContentUrl;
+        // Source URL changed — drop cached AI keyframes so the next
+        // verification re-extracts from the new source.
+        if (data.sourceContentUrl !== existing.sourceContentUrl) {
+          updateData.sourceKeyframes = null;
+        }
+      }
       if (data.sourceThumbnailUrl !== undefined)
         updateData.sourceThumbnailUrl = data.sourceThumbnailUrl;
       if (data.allowedPlatforms !== undefined)

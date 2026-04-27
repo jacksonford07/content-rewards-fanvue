@@ -1168,6 +1168,10 @@ function ThumbnailPreview({ url }: { url: string }) {
     setState("loading")
     const imgUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
     const img = new Image()
+    // Drive thumbnails redirect to lh3.googleusercontent.com and behave
+    // weirdly when the request carries a Referer (rate-limited or 403'd).
+    // Stripping the referer matches what Drive's own UI does.
+    img.referrerPolicy = "no-referrer"
     img.onload = () => {
       setThumbUrl(imgUrl)
       setState("success")
@@ -1228,7 +1232,12 @@ function ThumbnailPreview({ url }: { url: string }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-success/30 bg-success/5 p-5">
       <div className="size-16 shrink-0 overflow-hidden rounded-lg bg-muted">
-        <img src={thumbUrl} alt="Video thumbnail" className="size-full object-cover" />
+        <img
+          src={thumbUrl}
+          alt="Video thumbnail"
+          className="size-full object-cover"
+          referrerPolicy="no-referrer"
+        />
       </div>
       <div className="flex-1">
         <div className="flex items-center gap-1.5">
