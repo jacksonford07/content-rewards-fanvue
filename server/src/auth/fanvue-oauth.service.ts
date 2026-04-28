@@ -69,7 +69,7 @@ export class FanvueOAuthService {
       state,
       code_challenge: challenge,
       code_challenge_method: "S256",
-      prompt: "consent",
+      prompt: "login consent",
     });
 
     return `${FANVUE_AUTH_URL}?${params.toString()}`;

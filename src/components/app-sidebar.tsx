@@ -45,6 +45,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import api from "@/lib/api"
 import { QK } from "@/lib/query-keys"
+import { useLogout } from "@/queries/auth"
 
 type UserRole = "clipper" | "creator"
 
@@ -52,6 +53,7 @@ export function AppSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
+  const logoutMutation = useLogout()
   const { setPopoverOpen } = useSidebarHover()
   const { state, isMobile } = useSidebar()
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -248,7 +250,8 @@ export function AppSidebar() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => {
+              onClick={async () => {
+                await logoutMutation.mutateAsync()
                 logout()
                 toast.success("Signed out")
                 navigate("/login")

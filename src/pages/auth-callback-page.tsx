@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import api from "@/lib/api"
 import { useAuth } from "@/hooks/use-auth"
+import { queryClient } from "@/lib/query-client"
 
 const POST_LOGIN_REDIRECT_KEY = "cr_post_login_redirect"
 
@@ -23,6 +24,10 @@ export function AuthCallbackPage() {
       return
     }
     localStorage.setItem("cr_token", token)
+    // Drop any cached data from a previous session — protects against an
+    // account A → account B switch where staleTime would otherwise keep
+    // showing A's data until React Query refetches.
+    queryClient.clear()
 
     // Peek at the user's role BEFORE committing to a destination.
     // Dev-login users already have a locked role (clipper/creator); skip role-select.
