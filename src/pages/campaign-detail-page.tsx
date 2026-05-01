@@ -372,6 +372,13 @@ export function CampaignDetailPage() {
     }
   }
 
+  // B1: route the breadcrumb / Back link based on whether the viewer owns
+  // the campaign. Creators land here from "My campaigns" and expect to
+  // bounce back there; clippers land from the hub.
+  const viewerOwnsCampaign = user?.id === campaign.creator?.id
+  const backHref = viewerOwnsCampaign ? "/creator/campaigns" : "/"
+  const backLabel = viewerOwnsCampaign ? "My campaigns" : "Hub"
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
       <div className="mb-6 flex items-center justify-between">
@@ -379,7 +386,7 @@ export function CampaignDetailPage() {
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
-                <Link to="/">Hub</Link>
+                <Link to={backHref}>{backLabel}</Link>
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -391,7 +398,7 @@ export function CampaignDetailPage() {
           </BreadcrumbList>
         </Breadcrumb>
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/">
+          <Link to={backHref}>
             <ArrowLeft className="size-4" />
             Back
           </Link>
