@@ -13,6 +13,7 @@ import { AiVerificationService } from "../ai-verification/ai-verification.servic
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
+import { TrustService } from "../trust/trust.service.js";
 
 type EnrichedSubmission = {
   status: string;
@@ -107,6 +108,7 @@ export class SubmissionsService {
     private notifications: NotificationsService,
     private scrapers: ScrapersService,
     private aiVerification: AiVerificationService,
+    private trust: TrustService,
   ) {}
 
   async submit(
@@ -1138,6 +1140,9 @@ export class SubmissionsService {
       payoutEvents.map((e) => [e.submissionId, e]),
     );
 
+    // M3.7 — clipper trust score per row for the creator inbox.
+    const clipperTrustMap = await this.trust.getTrustScoresByIds(fanIds);
+
     const campaignsMap = new Map(campaignsList.map((c) => [c.id, c]));
     const fansMap = new Map(fans.map((f) => [f.id, f]));
     const creatorsMap = new Map(creators.map((c) => [c.id, c]));
@@ -1215,6 +1220,15 @@ export class SubmissionsService {
             disputedAt: e.disputedAt?.toISOString() ?? null,
             disputeResolution: e.disputeResolution,
             txHash: e.txHash,
+          };
+        })(),
+        fanTrust: (() => {
+          const t = clipperTrustMap.get(s.fanId);
+          if (!t) return null;
+          return {
+            ninetyDay: t.windows.ninetyDay,
+            allTime: t.windows.allTime,
+            lastPayoutAt: t.lastPayoutAt,
           };
         })(),
       };
