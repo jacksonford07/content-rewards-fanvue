@@ -80,6 +80,7 @@ const tabConfig: { key: TabKey; label: string }[] = [
   { key: "approved", label: "Approved" },
   { key: "verify", label: "Ready to verify" },
   { key: "paid", label: "Paid" },
+  { key: "disputed", label: "Disputed" },
   { key: "rejected", label: "Rejected" },
   { key: "banned", label: "Banned" },
 ]
@@ -89,6 +90,7 @@ const validTabs: TabKey[] = [
   "approved",
   "verify",
   "paid",
+  "disputed",
   "rejected",
   "banned",
 ]
@@ -125,6 +127,7 @@ export function CreatorInboxPage() {
     approved: 1,
     verify: 1,
     paid: 1,
+    disputed: 1,
     rejected: 1,
     banned: 1,
   })
@@ -146,6 +149,7 @@ export function CreatorInboxPage() {
     approved: stats?.approved ?? 0,
     verify: stats?.verify ?? 0,
     paid: stats?.paid ?? 0,
+    disputed: stats?.disputed ?? 0,
     rejected: stats?.rejected ?? 0,
     banned: stats?.banned ?? 0,
   }

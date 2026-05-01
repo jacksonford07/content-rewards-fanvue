@@ -111,7 +111,17 @@ export const submissions = pgTable("submissions", {
   }),
   aiNotes: text("ai_notes"),
   status: text("status", {
-    enum: ["pending", "approved", "rejected", "auto_approved", "paid", "flagged"],
+    enum: [
+      "pending",
+      "approved",
+      "rejected",
+      "auto_approved",
+      "paid",
+      "flagged",
+      "ready_to_pay",
+      "paid_off_platform",
+      "disputed",
+    ],
   })
     .default("pending")
     .notNull(),

@@ -61,7 +61,11 @@ function filterInboxByTab<T extends EnrichedSubmission>(
     case "banned":
       return rows.filter((s) => s.status === "rejected" && !!s.isBanned);
     case "paid":
-      return rows.filter((s) => s.status === "paid");
+      return rows.filter(
+        (s) => s.status === "paid" || s.status === "paid_off_platform",
+      );
+    case "disputed":
+      return rows.filter((s) => s.status === "disputed");
     default:
       return rows;
   }
@@ -79,7 +83,9 @@ function filterMineByTab<T extends EnrichedSubmission>(
         (s) => s.status === "approved" || s.status === "auto_approved",
       );
     case "paid":
-      return rows.filter((s) => s.status === "paid");
+      return rows.filter(
+        (s) => s.status === "paid" || s.status === "paid_off_platform",
+      );
     case "rejected":
       return rows.filter((s) => s.status === "rejected" && !s.isBanned);
     case "banned":
@@ -504,6 +510,7 @@ export class SubmissionsService {
       rejected: 0,
       banned: 0,
       paid: 0,
+      disputed: 0,
     };
     if (ownedIds.size === 0) return empty;
 
@@ -526,6 +533,7 @@ export class SubmissionsService {
       rejected: filterInboxByTab(enriched, "rejected").length,
       banned: filterInboxByTab(enriched, "banned").length,
       paid: filterInboxByTab(enriched, "paid").length,
+      disputed: filterInboxByTab(enriched, "disputed").length,
     };
   }
 
@@ -541,7 +549,10 @@ export class SubmissionsService {
             | "rejected"
             | "auto_approved"
             | "paid"
-            | "paid",
+            | "paid_off_platform"
+            | "ready_to_pay"
+            | "disputed"
+            | "flagged",
         ),
       );
     }

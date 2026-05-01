@@ -13,6 +13,9 @@ export type SubmissionStatus =
   | "rejected"
   | "auto_approved"
   | "paid"
+  | "ready_to_pay"
+  | "paid_off_platform"
+  | "disputed"
 
 export type RequirementsType = "native" | "google_doc"
 

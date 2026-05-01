@@ -215,6 +215,21 @@ function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?
       className: "border-primary/40 bg-primary/10 text-primary",
       icon: <CurrencyDollar className="size-3" weight="fill" />,
     },
+    paid_off_platform: {
+      label: "Paid (off-platform)",
+      className: "border-primary/40 bg-primary/10 text-primary",
+      icon: <CurrencyDollar className="size-3" weight="fill" />,
+    },
+    ready_to_pay: {
+      label: "Ready to pay",
+      className: "border-primary/40 bg-primary/10 text-primary",
+      icon: <CurrencyDollar className="size-3" weight="fill" />,
+    },
+    disputed: {
+      label: "Disputed",
+      className: "border-destructive/40 bg-destructive/10 text-destructive",
+      icon: <Prohibit className="size-3" weight="bold" />,
+    },
     rejected: {
       label: "Rejected",
       className: "border-destructive/40 bg-destructive/10 text-destructive",

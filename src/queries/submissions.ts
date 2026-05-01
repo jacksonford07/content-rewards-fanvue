@@ -14,6 +14,7 @@ export type InboxTab =
   | "approved"
   | "verify"
   | "paid"
+  | "disputed"
   | "rejected"
   | "banned"
 
@@ -22,6 +23,7 @@ export interface InboxStats {
   approved: number
   verify: number
   paid: number
+  disputed: number
   rejected: number
   banned: number
 }
