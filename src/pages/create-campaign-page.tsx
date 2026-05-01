@@ -66,6 +66,7 @@ import {
   payoutMethodLabel,
   type PayoutMethod,
 } from "@/lib/payout-validators"
+import { analytics } from "@/lib/analytics"
 import api from "@/lib/api"
 import {
   useCreateCampaign,
@@ -353,6 +354,13 @@ export function CreateCampaignPage() {
     setSavingAction("publish")
     try {
       const cid = await saveCampaign("active")
+      analytics.campaignCreated({
+        campaign_id: cid,
+        payout_type: state.payoutType,
+        accepted_payout_methods: state.acceptedPayoutMethods,
+        is_private: state.isPrivate,
+        total_budget: parseFloat(state.totalBudget) || 0,
+      })
       await refresh()
       if (state.isPrivate) {
         const res = await api.get<Campaign>(`/campaigns/${cid}`)

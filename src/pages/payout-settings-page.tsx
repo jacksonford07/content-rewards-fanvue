@@ -29,6 +29,7 @@ import {
   usePayoutSettings,
   useUpdatePayoutSettings,
 } from "@/queries/payout-methods"
+import { analytics } from "@/lib/analytics"
 
 const METHOD_PLACEHOLDER: Record<PayoutMethod, string> = {
   paypal: "you@example.com or @handle",
@@ -183,6 +184,10 @@ export function PayoutSettingsPage() {
         methods,
         contactChannel: contactChannel as ContactChannel,
         contactValue: contactValue.trim(),
+      })
+      analytics.payoutSettingsSaved({
+        methods_count: methods.length,
+        has_contact: !!contactValue.trim(),
       })
       toast.success("Payout settings saved")
     } catch (err: unknown) {

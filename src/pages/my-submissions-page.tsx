@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { analytics } from "@/lib/analytics"
 
 type FilterKey = MineTab
 
@@ -359,6 +360,8 @@ function SubmissionRow({ submission }: { submission: Submission }) {
             <TrackingLinkRow
               url={submission.trackingLinkUrl}
               slug={submission.trackingLinkSlug ?? ""}
+              submissionId={submission.id}
+              campaignId={submission.campaignId}
             />
           )}
 
@@ -456,7 +459,32 @@ function SubmissionRow({ submission }: { submission: Submission }) {
   )
 }
 
-function TrackingLinkRow({ url, slug }: { url: string; slug: string }) {
+function TrackingLinkRow({
+  url,
+  slug,
+  submissionId,
+  campaignId,
+}: {
+  url: string
+  slug: string
+  submissionId: string
+  campaignId: string
+}) {
+  // Fire tracking_link_minted once per slug (deduped via localStorage so
+  // the event represents "clipper saw their link" not "clipper visited
+  // submissions page").
+  useEffect(() => {
+    if (!slug) return
+    const seenKey = `tracking_link_seen:${slug}`
+    if (localStorage.getItem(seenKey)) return
+    localStorage.setItem(seenKey, "1")
+    analytics.trackingLinkMinted({
+      submission_id: submissionId,
+      campaign_id: campaignId,
+      slug,
+    })
+  }, [slug, submissionId, campaignId])
+
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
@@ -506,6 +534,10 @@ function PayoutConfirmPrompt({ submission }: { submission: Submission }) {
   const handleConfirm = async () => {
     try {
       await confirm.mutateAsync(submission.id)
+      analytics.paymentConfirmed({
+        submission_id: submission.id,
+        campaign_id: submission.campaignId,
+      })
       toast.success("Confirmed receipt", {
         description: "Trust score updated.",
       })
@@ -524,6 +556,11 @@ function PayoutConfirmPrompt({ submission }: { submission: Submission }) {
       await dispute.mutateAsync({
         id: submission.id,
         reason: disputeReason.trim(),
+      })
+      analytics.paymentDisputed({
+        submission_id: submission.id,
+        campaign_id: submission.campaignId,
+        method: event.method,
       })
       toast.success("Dispute raised", {
         description: "Jackson will review this within a few days.",

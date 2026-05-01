@@ -68,6 +68,7 @@ import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
 import { usePayoutSettings } from "@/queries/payout-methods"
 import { payoutMethodLabel } from "@/lib/payout-validators"
 import { TrustBadge } from "@/components/trust-badge"
+import { analytics } from "@/lib/analytics"
 import { QK } from "@/lib/query-keys"
 import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
@@ -365,10 +366,17 @@ export function CampaignDetailPage() {
   const handleSubmit = async () => {
     if (!campaign) return
     try {
-      await submitMutation.mutateAsync({
+      const result = await submitMutation.mutateAsync({
         campaignId: campaign.id,
         postUrl,
         platform: platform as Platform,
+      })
+      const submissionId =
+        (result as { id?: string } | undefined)?.id ?? "unknown"
+      analytics.submissionCreated({
+        submission_id: submissionId,
+        campaign_id: campaign.id,
+        platform: platform as string,
       })
       setSubmitOpen(false)
       setPostUrl("")

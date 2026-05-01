@@ -33,6 +33,7 @@ import {
 } from "@/lib/payout-validators"
 import { formatCurrency } from "@/lib/mock-data"
 import { useMarkPaid, usePayoutContext } from "@/queries/submissions"
+import { analytics } from "@/lib/analytics"
 
 interface Props {
   submissionId: string | null
@@ -139,6 +140,13 @@ export function MarkPaidDialog({ submissionId, open, onOpenChange }: Props) {
         value: value.trim(),
         reference: reference.trim() || undefined,
         txHash: txHash.trim() || undefined,
+      })
+      analytics.submissionMarkedPaid({
+        submission_id: submissionId,
+        campaign_id: ctx?.campaign.id ?? "unknown",
+        method,
+        amount: (ctx?.submission.payoutAmountCents ?? 0) / 100,
+        has_tx_hash: !!txHash.trim(),
       })
       toast.success("Marked paid", {
         description:

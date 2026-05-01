@@ -73,6 +73,7 @@ import {
 import { PaginationBar } from "@/components/pagination-bar"
 import { MarkPaidDialog } from "@/components/mark-paid-dialog"
 import { TrustBadge } from "@/components/trust-badge"
+import { analytics } from "@/lib/analytics"
 import type { Submission } from "@/lib/types"
 
 type TabKey = InboxTab
@@ -171,6 +172,14 @@ export function CreatorInboxPage() {
   const approve = async (s: Submission) => {
     try {
       await approveMutation.mutateAsync(s.id)
+      analytics.submissionApproved({
+        submission_id: s.id,
+        campaign_id: s.campaignId,
+        // We don't have payoutType on Submission; default to per_1k_views
+        // — most accurate when M5 dashboards filter by payout_type.
+        // Improve in a follow-up by enriching Submission with campaign.payoutType.
+        payout_type: "per_1k_views",
+      })
       toast.success("Submission approved", {
         description: `${s.fanName}'s clip entered 30-day view verification.`,
       })
