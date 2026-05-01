@@ -8,11 +8,16 @@ import type {
   TQueryOptions,
 } from "@/lib/query-types"
 import type { Submission, SubmissionSnapshot } from "@/lib/types"
+import type {
+  ContactChannel,
+  PayoutMethod,
+} from "@/lib/payout-validators"
 
 export type InboxTab =
   | "pending"
   | "approved"
   | "verify"
+  | "ready_to_pay"
   | "paid"
   | "disputed"
   | "rejected"
@@ -22,6 +27,7 @@ export interface InboxStats {
   pending: number
   approved: number
   verify: number
+  ready_to_pay: number
   paid: number
   disputed: number
   rejected: number
@@ -253,6 +259,69 @@ export function useSubmissionSnapshots(
       return res.data
     },
     ...options,
+  })
+}
+
+// ── M2.4 — Off-platform mark-paid flow ──────────────────────────────────────
+
+export interface PayoutContext {
+  submission: { id: string; status: string; payoutAmountCents: number }
+  campaign: {
+    id: string
+    title: string
+    acceptedPayoutMethods: PayoutMethod[]
+  }
+  clipper: {
+    id: string
+    displayName: string
+    handle: string
+    contactChannel: ContactChannel | null
+    contactValue: string | null
+  }
+  overlapMethods: PayoutMethod[]
+  clipperSavedMethods: { method: PayoutMethod; value: string }[]
+}
+
+export function usePayoutContext(
+  submissionId: string | null | undefined,
+  options?: TQueryOptions<PayoutContext>,
+) {
+  return useQuery({
+    queryKey: ["submissions.payoutContext", submissionId] as const,
+    queryFn: async () => {
+      const res = await api.get<PayoutContext>(
+        `/submissions/${submissionId}/payout-context`,
+      )
+      return res.data
+    },
+    enabled: !!submissionId,
+    ...options,
+  })
+}
+
+export function useMarkPaid(
+  options?: TMutationOptions<
+    unknown,
+    {
+      id: string
+      method: PayoutMethod
+      value: string
+      reference?: string
+      txHash?: string
+    }
+  >,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...body }) => {
+      const res = await api.post(`/submissions/${id}/mark-paid`, body)
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      options?.onSuccess?.(...args)
+    },
   })
 }
 
