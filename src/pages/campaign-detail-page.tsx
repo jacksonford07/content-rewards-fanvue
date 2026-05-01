@@ -48,13 +48,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Alert,
@@ -1033,27 +1026,6 @@ export function CampaignDetailPage() {
                   Detected {platformLabels[detectedPlatform]}
                 </p>
               ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label>Platform</Label>
-              <Select
-                value={platform}
-                onValueChange={(v) => setPlatform(v as Platform)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose platform" />
-                </SelectTrigger>
-                <SelectContent>
-                  {campaign.allowedPlatforms.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      <div className="flex items-center gap-2">
-                        <PlatformIcon platform={p} />
-                        {platformLabels[p]}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <Separator />
