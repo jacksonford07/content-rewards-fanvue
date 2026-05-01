@@ -14,7 +14,6 @@ import { HubPage } from "@/pages/hub-page"
 import { CampaignDetailPage } from "@/pages/campaign-detail-page"
 import { CampaignBySlugPage } from "@/pages/campaign-by-slug-page"
 import { MySubmissionsPage } from "@/pages/my-submissions-page"
-import { WalletPage } from "@/pages/wallet-page"
 import { CreatorCampaignsPage } from "@/pages/creator-campaigns-page"
 import { CreateCampaignPage } from "@/pages/create-campaign-page"
 import { CreatorInboxPage } from "@/pages/creator-inbox-page"
@@ -55,7 +54,6 @@ export default function App() {
               <Route path="campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="c/:slug" element={<CampaignBySlugPage />} />
               <Route path="submissions" element={<MySubmissionsPage />} />
-              <Route path="wallet" element={<WalletPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route
                 path="creator/campaigns"

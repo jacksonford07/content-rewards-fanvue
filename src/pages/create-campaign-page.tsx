@@ -11,10 +11,8 @@ import {
   CheckCircle,
   WarningCircle,
   CurrencyDollar,
-  Wallet,
   Sparkle,
   Info,
-  ArrowCircleUp,
   FloppyDisk,
   Lock,
   Copy,
@@ -27,8 +25,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Separator } from "@/components/ui/separator"
-import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -68,27 +64,19 @@ import { formatCurrency, platformLabels } from "@/lib/mock-data"
 import api from "@/lib/api"
 import {
   useCreateCampaign,
-  useFundCampaign,
   useUpdateCampaign,
 } from "@/queries/campaigns"
-import { useTopup } from "@/queries/wallet"
 import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
 import type { Campaign, Platform, RequirementsType } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 
 const allSteps = [
   { id: 1, label: "Basics", description: "Title & description" },
   { id: 2, label: "Requirements", description: "Brief for clippers" },
   { id: 3, label: "Source", description: "Google Drive video" },
   { id: 4, label: "Platforms", description: "Where clips can post" },
-  { id: 5, label: "Rewards", description: "Rate & budget" },
-  { id: 6, label: "Fund", description: "Escrow payment" },
+  { id: 5, label: "Rewards", description: "Rate, budget & publish" },
 ]
 
 function getFirstIncompleteStep(c: Campaign): number {
@@ -100,28 +88,23 @@ function getFirstIncompleteStep(c: Campaign): number {
   if (!hasReqs) return 2
   if (!c.sourceContentUrl?.startsWith("http")) return 3
   if (!c.allowedPlatforms?.length) return 4
-  if (!c.rewardRatePer1k || c.rewardRatePer1k <= 0) return 5
-  return 6
+  return 5
 }
 
 export function CreateCampaignPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const editing = Boolean(id)
-  const { user, refresh } = useAuth()
+  const { refresh } = useAuth()
   const createMutation = useCreateCampaign()
   const updateMutation = useUpdateCampaign()
-  const fundMutation = useFundCampaign()
-  const topupMutation = useTopup()
   const [, setExisting] = useState<Campaign | undefined>()
   const [loadError, setLoadError] = useState(false)
   const [loadingExisting, setLoadingExisting] = useState(Boolean(id))
-  const [topupOpen, setTopupOpen] = useState(false)
-  const [topupAmount, setTopupAmount] = useState("")
   const [draftId, setDraftId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savingAction, setSavingAction] = useState<
-    null | "draft" | "pending" | "publish"
+    null | "draft" | "publish"
   >(null)
   const [leaveOpen, setLeaveOpen] = useState(false)
   const [initialSnapshot, setInitialSnapshot] = useState("")
@@ -297,7 +280,7 @@ export function CreateCampaignPage() {
     }
   }
 
-  const saveCampaign = async (status: "draft" | "pending_budget") => {
+  const saveCampaign = async (status: "draft" | "active") => {
     const payload = { ...buildPayload(), status }
     const cid = draftId || id
     if (cid) {
@@ -323,36 +306,14 @@ export function CreateCampaignPage() {
     setSavingAction(null)
   }
 
-  const handleSaveAsPending = async () => {
-    if (!validateRewards()) return
-    setSaving(true)
-    setSavingAction("pending")
-    try {
-      await saveCampaign("pending_budget")
-      toast.success("Campaign saved", {
-        description: "Fund it any time from the budget page.",
-      })
-      navigate("/creator/campaigns")
-    } catch {
-      toast.error("Failed to save campaign")
-    }
-    setSaving(false)
-    setSavingAction(null)
-  }
-
   const handlePublish = async () => {
     if (!validateRewards()) return
     setSaving(true)
     setSavingAction("publish")
     try {
-      const cid = await saveCampaign("pending_budget")
-      await fundMutation.mutateAsync({
-        id: cid,
-        amount: parseFloat(state.totalBudget),
-      })
+      const cid = await saveCampaign("active")
       await refresh()
       if (state.isPrivate) {
-        // Fetch the created campaign to get its slug
         const res = await api.get<Campaign>(`/campaigns/${cid}`)
         if (res.data.privateSlug) {
           setShareLink(`${window.location.origin}/c/${res.data.privateSlug}`)
@@ -361,19 +322,12 @@ export function CreateCampaignPage() {
           return
         }
       }
-      toast.success("Campaign created and funded", {
+      toast.success("Campaign published", {
         description: `${state.title} is now live in the hub.`,
       })
       navigate("/creator/campaigns")
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || ""
-      if (msg.includes("Insufficient wallet balance")) {
-        toast.error("Insufficient wallet balance", {
-          description: "Top up your wallet before funding a campaign.",
-        })
-      } else {
-        toast.error("Failed to create campaign")
-      }
+    } catch {
+      toast.error("Failed to publish campaign")
     }
     setSaving(false)
     setSavingAction(null)
@@ -733,83 +687,6 @@ export function CreateCampaignPage() {
                   )}
                 </AlertDescription>
               </Alert>
-            </div>
-          )}
-
-          {!loadingExisting && step === 6 && (
-            <div className="space-y-5">
-              <p className="text-sm font-medium">
-                Fund your escrow — your campaign goes live once payment clears.
-              </p>
-
-              <div className={cn(
-                "flex items-center gap-3 rounded-xl border p-4",
-                (user?.walletBalance ?? 0) >= budgetNum
-                  ? "border-primary/60 bg-primary/10"
-                  : "border-warning/60 bg-warning/10"
-              )}>
-                <Wallet className="size-5 text-primary" weight="fill" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Fanvue wallet balance</p>
-                  <p className="text-xs text-muted-foreground">
-                    Available balance: {formatCurrency(user?.walletBalance ?? 0)}
-                  </p>
-                </div>
-                {(user?.walletBalance ?? 0) >= budgetNum ? (
-                  <Badge variant="outline" className="border-success/40 bg-success/10 text-success">
-                    Instant
-                  </Badge>
-                ) : (
-                  <Button size="sm" onClick={() => { setTopupAmount(""); setTopupOpen(true) }}>
-                    <ArrowCircleUp className="size-4" weight="fill" />
-                    Top up
-                  </Button>
-                )}
-              </div>
-
-              {(user?.walletBalance ?? 0) < budgetNum && (
-                <Alert className="border-warning/30 bg-warning/5">
-                  <WarningCircle className="size-4 text-warning" weight="fill" />
-                  <AlertTitle>Insufficient balance</AlertTitle>
-                  <AlertDescription>
-                    You need {formatCurrency(budgetNum - (user?.walletBalance ?? 0))} more to fund this campaign. Top up your wallet to continue.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <Card className="border-border/60 bg-background/50 p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Summary
-                </p>
-                <Separator className="my-3" />
-                <div className="space-y-2 text-sm">
-                  <Row
-                    label="Campaign title"
-                    value={state.title || "Untitled"}
-                  />
-                  <Row
-                    label="Reward rate"
-                    value={`${formatCurrency(rateNum)} / 1K views`}
-                  />
-                  <Row
-                    label="Platforms"
-                    value={
-                      state.platforms.length
-                        ? state.platforms
-                            .map((p) => platformLabels[p])
-                            .join(", ")
-                        : "None selected"
-                    }
-                  />
-                  <Separator className="my-2" />
-                  <div className="flex items-center justify-between text-base font-semibold">
-                    <span>Total to fund</span>
-                    <span className="tabular-nums text-primary">
-                      {formatCurrency(budgetNum)}
-                    </span>
-                  </div>
-                </div>
-              </Card>
 
               <div className="rounded-xl border border-border/60 bg-background/40 p-4">
                 <label className="flex cursor-pointer items-start gap-3">
@@ -834,14 +711,15 @@ export function CreateCampaignPage() {
                 </label>
               </div>
 
-              <label className="flex items-start gap-2.5 text-xs text-muted-foreground">
-                <Checkbox defaultChecked className="mt-0.5" />
-                <span>
-                  I understand budget is held in escrow, released at day-30 view
-                  lock. Unused budget can be withdrawn or rolled into a new
-                  campaign.
-                </span>
-              </label>
+              <Alert className="border-border/60 bg-background/40">
+                <Info className="size-4 text-muted-foreground" />
+                <AlertTitle>Off-platform payouts</AlertTitle>
+                <AlertDescription>
+                  Payouts happen off-platform. After day 30 you'll mark
+                  clippers paid here once you've sent them money via PayPal,
+                  crypto, bank transfer, etc.
+                </AlertDescription>
+              </Alert>
             </div>
           )}
         </CardContent>
@@ -864,19 +742,16 @@ export function CreateCampaignPage() {
             <>
               <Button
                 variant="outline"
-                loading={savingAction === "draft" || savingAction === "pending"}
-                disabled={saving && savingAction !== "draft" && savingAction !== "pending"}
-                onClick={step >= 5 ? handleSaveAsPending : handleSaveDraft}
+                loading={savingAction === "draft"}
+                disabled={saving && savingAction !== "draft"}
+                onClick={handleSaveDraft}
               >
                 <FloppyDisk className="size-4" />
                 Save draft
               </Button>
               <Button
                 disabled={!canNext || saving}
-                onClick={() => {
-                  if (step === 5 && !validateRewards()) return
-                  setStep((s) => s + 1)
-                }}
+                onClick={() => setStep((s) => s + 1)}
               >
                 Next step
                 <ArrowRight className="size-4" />
@@ -886,116 +761,26 @@ export function CreateCampaignPage() {
             <>
               <Button
                 variant="outline"
-                loading={savingAction === "pending"}
-                disabled={saving && savingAction !== "pending"}
-                onClick={handleSaveAsPending}
+                loading={savingAction === "draft"}
+                disabled={saving && savingAction !== "draft"}
+                onClick={handleSaveDraft}
               >
                 <FloppyDisk className="size-4" />
                 Save draft
               </Button>
-              {(() => {
-                const insufficientBalance = (user?.walletBalance ?? 0) < budgetNum
-                const btn = (
-                  <Button
-                    disabled={
-                      !canNext ||
-                      insufficientBalance ||
-                      (saving && savingAction !== "publish")
-                    }
-                    loading={savingAction === "publish"}
-                    onClick={handlePublish}
-                  >
-                    <Sparkle weight="fill" className="size-4" />
-                    Fund & publish
-                  </Button>
-                )
-                if (insufficientBalance) {
-                  return (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span tabIndex={0}>{btn}</span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        Top up your wallet to fund this campaign
-                      </TooltipContent>
-                    </Tooltip>
-                  )
-                }
-                return btn
-              })()}
+              <Button
+                disabled={!canNext || (saving && savingAction !== "publish")}
+                loading={savingAction === "publish"}
+                onClick={handlePublish}
+              >
+                <Sparkle weight="fill" className="size-4" />
+                Publish
+              </Button>
             </>
           )}
         </div>
       </div>
       )}
-
-      {/* Inline top-up dialog */}
-      <Dialog
-        open={topupOpen}
-        onOpenChange={(open) => {
-          if (!topupMutation.isPending) setTopupOpen(open)
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Top up wallet</DialogTitle>
-            <DialogDescription>
-              Add funds to your Fanvue wallet to fund this campaign.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid grid-cols-4 gap-2">
-              {[100, 500, 1000, 5000].map((n) => (
-                <Button
-                  key={n}
-                  variant="outline"
-                  onClick={() => setTopupAmount(n.toString())}
-                >
-                  ${n}
-                </Button>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="topup-amount-inline">Custom amount</Label>
-              <Input
-                id="topup-amount-inline"
-                type="number"
-                placeholder="0.00"
-                value={topupAmount}
-                onChange={(e) => setTopupAmount(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              disabled={topupMutation.isPending}
-              onClick={() => setTopupOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  await topupMutation.mutateAsync(parseFloat(topupAmount) || 0)
-                  toast.success("Wallet topped up", {
-                    description: `${formatCurrency(parseFloat(topupAmount) || 0)} added to your balance.`,
-                  })
-                  await refresh()
-                  setTopupOpen(false)
-                  setTopupAmount("")
-                } catch {
-                  toast.error("Top-up failed")
-                }
-              }}
-              disabled={!topupAmount || parseFloat(topupAmount) <= 0}
-              loading={topupMutation.isPending}
-            >
-              Confirm payment
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={!!shareLink}
@@ -1128,17 +913,6 @@ function RequirementOption({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
     </label>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="truncate max-w-[60%] text-right font-medium">
-        {value}
-      </span>
-    </div>
   )
 }
 

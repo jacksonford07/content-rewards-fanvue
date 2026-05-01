@@ -11,7 +11,6 @@ export interface AuthUser {
   isCreator: boolean
   role: string
 
-  walletBalance: number
   createdAt: string
 }
 

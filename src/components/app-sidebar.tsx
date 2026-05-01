@@ -5,7 +5,6 @@ import {
   House,
   FilmSlate,
   ListChecks,
-  Wallet,
   MegaphoneSimple,
   Tray,
   ChartBar,
@@ -89,7 +88,6 @@ export function AppSidebar() {
   const clipperNav = useMemo(() => [
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
-    { to: "/wallet", label: "Wallet & earnings", icon: Wallet },
   ], [counts.submissions])
 
   const creatorNav = useMemo(() => [
@@ -97,7 +95,6 @@ export function AppSidebar() {
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
     { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
-    { to: "/wallet", label: "Wallet", icon: Wallet },
   ], [counts.inbox])
 
   const bottomNav = useMemo(() => [

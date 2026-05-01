@@ -1,13 +1,12 @@
 import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { Bell, Plus, Wallet } from "@phosphor-icons/react"
+import { Bell, Plus } from "@phosphor-icons/react"
 
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/hooks/use-auth"
-import { formatCurrency } from "@/lib/mock-data"
 import api from "@/lib/api"
 import { QK } from "@/lib/query-keys"
 
@@ -29,16 +28,6 @@ export function AppTopbar() {
       <Separator orientation="vertical" className="mx-1 h-6 md:hidden" />
 
       <div className="ml-auto flex items-center gap-1 md:gap-2">
-        <Link
-          to="/wallet"
-          className="hidden items-center gap-2 rounded-full border border-border/80 bg-card/50 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-card md:flex"
-        >
-          <Wallet className="size-4 text-primary" weight="fill" />
-          <span className="tabular-nums">
-            {formatCurrency(user?.walletBalance ?? 0)}
-          </span>
-        </Link>
-
         <Button
           variant="ghost"
           size="icon"

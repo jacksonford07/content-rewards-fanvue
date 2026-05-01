@@ -15,10 +15,6 @@ export const QK = {
   notifications: {
     list: "notifications.list",
   },
-  wallet: {
-    balance: "wallet.balance",
-    transactions: "wallet.transactions",
-  },
   analytics: {
     dashboard: "analytics.dashboard",
     campaigns: "analytics.campaigns",

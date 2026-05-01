@@ -229,8 +229,6 @@ export function useVerifyViews(
     ...options,
     onSuccess: (...args) => {
       invalidateSubmissionFamily(qc)
-      qc.invalidateQueries({ queryKey: [QK.wallet.balance] })
-      qc.invalidateQueries({ queryKey: [QK.wallet.transactions] })
       qc.invalidateQueries({ queryKey: [QK.auth.me] })
       qc.invalidateQueries({ queryKey: [QK.campaigns.mineStats] })
       qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })
