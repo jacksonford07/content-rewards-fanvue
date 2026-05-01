@@ -705,6 +705,71 @@ export class SubmissionsService {
     return { event, status: "paid_off_platform" };
   }
 
+  async confirmPayout(submissionId: string, clipperId: string) {
+    const [event] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (!event) throw new NotFoundException("Payout event not found");
+    if (event.clipperId !== clipperId) throw new ForbiddenException();
+    if (event.confirmedAt) {
+      return { event, idempotent: true };
+    }
+    if (event.disputedAt) {
+      throw new BadRequestException(
+        "Cannot confirm a disputed payout. Withdraw the dispute first.",
+      );
+    }
+    await this.db
+      .update(schema.payoutEvents)
+      .set({ confirmedAt: new Date() })
+      .where(eq(schema.payoutEvents.id, event.id));
+    return { ...event, confirmedAt: new Date() };
+  }
+
+  async disputePayout(
+    submissionId: string,
+    clipperId: string,
+    reason?: string,
+  ) {
+    const [event] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (!event) throw new NotFoundException("Payout event not found");
+    if (event.clipperId !== clipperId) throw new ForbiddenException();
+    if (event.confirmedAt) {
+      throw new BadRequestException(
+        "Cannot dispute a payout you already confirmed.",
+      );
+    }
+    if (event.disputedAt) {
+      return { event, idempotent: true };
+    }
+    await this.db
+      .update(schema.payoutEvents)
+      .set({ disputedAt: new Date() })
+      .where(eq(schema.payoutEvents.id, event.id));
+    // Move submission status to disputed so it surfaces in the creator's
+    // Disputed tab + the admin queue (M3.6).
+    await this.db
+      .update(schema.submissions)
+      .set({ status: "disputed", updatedAt: new Date() })
+      .where(eq(schema.submissions.id, submissionId));
+    // Notify the creator. No Slack webhook (CC1 D5 / M3.6 D5).
+    const reasonNote = reason?.trim() ? `\n\nReason: ${reason.trim()}` : "";
+    await this.notifications.create({
+      userId: event.creatorId,
+      type: "payout_released",
+      title: "Payout disputed",
+      message: `A clipper disputed a payout you marked sent. Review in the Disputed tab.${reasonNote}`,
+      actionUrl: "/creator/inbox?tab=disputed",
+    });
+    return { ...event, disputedAt: new Date() };
+  }
+
   async byCampaign(campaignId: string, status?: string) {
     const conditions = [eq(schema.submissions.campaignId, campaignId)];
     if (status) {
@@ -1058,6 +1123,21 @@ export class SubmissionsService {
       bans.map((b) => [`${b.campaignId}:${b.userId}`, b.createdAt]),
     );
 
+    // M3.5: surface payout-event confirmation status alongside the
+    // submission so the clipper UI knows whether to show the
+    // confirm/dispute prompt or a "Confirmed" / "Under review" badge.
+    const submissionIds = rows.map((r) => r.id);
+    const payoutEvents =
+      submissionIds.length > 0
+        ? await this.db
+            .select()
+            .from(schema.payoutEvents)
+            .where(inArray(schema.payoutEvents.submissionId, submissionIds))
+        : [];
+    const payoutEventsMap = new Map(
+      payoutEvents.map((e) => [e.submissionId, e]),
+    );
+
     const campaignsMap = new Map(campaignsList.map((c) => [c.id, c]));
     const fansMap = new Map(fans.map((f) => [f.id, f]));
     const creatorsMap = new Map(creators.map((c) => [c.id, c]));
@@ -1123,6 +1203,20 @@ export class SubmissionsService {
           : 0,
         aiReviewResult: s.aiReviewResult ?? undefined,
         aiNotes: s.aiNotes ?? undefined,
+        payoutEvent: (() => {
+          const e = payoutEventsMap.get(s.id);
+          if (!e) return null;
+          return {
+            id: e.id,
+            method: e.method,
+            amountCents: e.amountCents,
+            createdAt: e.createdAt.toISOString(),
+            confirmedAt: e.confirmedAt?.toISOString() ?? null,
+            disputedAt: e.disputedAt?.toISOString() ?? null,
+            disputeResolution: e.disputeResolution,
+            txHash: e.txHash,
+          };
+        })(),
       };
     });
   }

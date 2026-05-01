@@ -96,6 +96,18 @@ export interface Submission {
   pendingEarnings?: number
   aiReviewResult?: "clean" | "flagged"
   aiNotes?: string
+  payoutEvent?: PayoutEventSummary | null
+}
+
+export interface PayoutEventSummary {
+  id: string
+  method: PayoutMethod
+  amountCents: number
+  createdAt: string
+  confirmedAt: string | null
+  disputedAt: string | null
+  disputeResolution: "confirmed" | "rejected" | null
+  txHash: string | null
 }
 
 export interface SubmissionSnapshot {

@@ -35,12 +35,35 @@ import {
   timeUntil,
 } from "@/lib/mock-data"
 import {
+  useConfirmPayout,
+  useDisputePayout,
   useMySubmissions,
   useMySubmissionsStats,
   type MineTab,
 } from "@/queries/submissions"
 import { PaginationBar } from "@/components/pagination-bar"
 import type { Submission, SubmissionStatus } from "@/lib/types"
+import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 
 type FilterKey = MineTab
 
@@ -330,6 +353,28 @@ function SubmissionRow({ submission }: { submission: Submission }) {
               {submission.rejectionReason}
             </div>
           )}
+
+          {/* M3.5 — clipper confirmation prompt */}
+          {submission.payoutEvent &&
+            submission.status === "paid_off_platform" &&
+            !submission.payoutEvent.confirmedAt &&
+            !submission.payoutEvent.disputedAt && (
+              <PayoutConfirmPrompt submission={submission} />
+            )}
+          {submission.payoutEvent?.confirmedAt && (
+            <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-success">
+              <CheckCircle weight="fill" className="size-3.5" />
+              You confirmed receipt on{" "}
+              {new Date(submission.payoutEvent.confirmedAt).toLocaleDateString()}
+            </div>
+          )}
+          {submission.payoutEvent?.disputedAt &&
+            !submission.payoutEvent.disputeResolution && (
+              <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-warning">
+                <Warning weight="fill" className="size-3.5" />
+                Dispute under review
+              </div>
+            )}
         </div>
 
 
@@ -400,5 +445,140 @@ function SubmissionRow({ submission }: { submission: Submission }) {
         />
       )}
     </Card>
+  )
+}
+
+function PayoutConfirmPrompt({ submission }: { submission: Submission }) {
+  const confirm = useConfirmPayout()
+  const dispute = useDisputePayout()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [disputeOpen, setDisputeOpen] = useState(false)
+  const [disputeReason, setDisputeReason] = useState("")
+  const event = submission.payoutEvent
+  if (!event) return null
+
+  const handleConfirm = async () => {
+    try {
+      await confirm.mutateAsync(submission.id)
+      toast.success("Confirmed receipt", {
+        description: "Trust score updated.",
+      })
+      setConfirmOpen(false)
+    } catch {
+      toast.error("Couldn't confirm")
+    }
+  }
+
+  const handleDispute = async () => {
+    if (!disputeReason.trim()) {
+      toast.error("Add a short reason for the dispute")
+      return
+    }
+    try {
+      await dispute.mutateAsync({
+        id: submission.id,
+        reason: disputeReason.trim(),
+      })
+      toast.success("Dispute raised", {
+        description: "Jackson will review this within a few days.",
+      })
+      setDisputeOpen(false)
+      setDisputeReason("")
+    } catch {
+      toast.error("Couldn't raise dispute")
+    }
+  }
+
+  return (
+    <>
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+        <span className="text-xs font-medium text-foreground">
+          Did you receive {formatCurrency(event.amountCents / 100)} via{" "}
+          {event.method}?
+        </span>
+        <span className="ml-auto flex gap-2">
+          <Button size="sm" onClick={() => setConfirmOpen(true)}>
+            <CheckCircle weight="fill" className="size-3.5" />
+            Yes, received
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDisputeOpen(true)}
+          >
+            <Warning weight="fill" className="size-3.5" />
+            Dispute
+          </Button>
+        </span>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm payment received?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You're confirming you received {formatCurrency(event.amountCents / 100)}{" "}
+              from this campaign's creator. This counts toward their trust score.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirm.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirm()
+              }}
+              disabled={confirm.isPending}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={disputeOpen} onOpenChange={setDisputeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raise a dispute</DialogTitle>
+            <DialogDescription>
+              Use this if the payment didn't arrive, the amount was wrong, or
+              the wallet address didn't match what you saved. The campaign
+              owner is notified and a human reviewer follows up.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="dispute-reason" className="text-xs">
+              What went wrong?
+            </Label>
+            <Textarea
+              id="dispute-reason"
+              rows={4}
+              placeholder="Be specific — payment not received, wrong amount, wrong address, etc."
+              value={disputeReason}
+              onChange={(e) => setDisputeReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={dispute.isPending}
+              onClick={() => setDisputeOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              loading={dispute.isPending}
+              disabled={!disputeReason.trim()}
+              onClick={handleDispute}
+            >
+              Raise dispute
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
