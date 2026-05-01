@@ -12,6 +12,7 @@ import {
   Sparkle,
   SignOut,
   CaretUpDown,
+  Wallet,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -88,6 +89,7 @@ export function AppSidebar() {
   const clipperNav = useMemo(() => [
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
+    { to: "/settings/payout", label: "Payout settings", icon: Wallet },
   ], [counts.submissions])
 
   const creatorNav = useMemo(() => [
