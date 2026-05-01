@@ -11,6 +11,8 @@ export interface AuthUser {
   isCreator: boolean
   role: string
 
+  fanvueScopes?: string[]
+
   createdAt: string
 }
 

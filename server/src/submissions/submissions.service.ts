@@ -14,6 +14,7 @@ import { NotificationsService } from "../notifications/notifications.service.js"
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
 import { TrustService } from "../trust/trust.service.js";
+import { FanvueTrackingLinksService } from "../fanvue/fanvue-tracking-links.service.js";
 
 type EnrichedSubmission = {
   status: string;
@@ -109,6 +110,7 @@ export class SubmissionsService {
     private scrapers: ScrapersService,
     private aiVerification: AiVerificationService,
     private trust: TrustService,
+    private fanvueLinks: FanvueTrackingLinksService,
   ) {}
 
   async submit(
@@ -825,6 +827,18 @@ export class SubmissionsService {
       .where(eq(schema.campaigns.id, submission.campaignId))
       .limit(1);
 
+    // M4.3 — mint a Fanvue tracking link for per-subscriber campaigns. Idempotent:
+    // re-approving a submission that already has a link is a no-op. Mint failures
+    // (auth, scope, rate limit) do not block the approval — they're logged and
+    // the link is retried later.
+    if (
+      campaign &&
+      campaign.payoutType === "per_subscriber" &&
+      !submission.trackingLinkUuid
+    ) {
+      await this.tryMintTrackingLink(submission, campaign);
+    }
+
     await this.notifications.create({
       userId: submission.fanId,
       type: "approved",
@@ -834,6 +848,60 @@ export class SubmissionsService {
     });
 
     return { success: true };
+  }
+
+  private async tryMintTrackingLink(
+    submission: typeof schema.submissions.$inferSelect,
+    campaign: typeof schema.campaigns.$inferSelect,
+  ) {
+    try {
+      const [creator] = await this.db
+        .select({
+          accessToken: schema.users.fanvueAccessToken,
+          scopes: schema.users.fanvueScopes,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, campaign.creatorId))
+        .limit(1);
+      if (!creator?.accessToken) {
+        this.logger.warn(
+          `Skipping tracking-link mint for submission ${submission.id}: creator has no Fanvue token`,
+        );
+        return;
+      }
+      if (!creator.scopes.includes("write:tracking_links")) {
+        this.logger.warn(
+          `Skipping tracking-link mint for submission ${submission.id}: creator missing write:tracking_links scope`,
+        );
+        return;
+      }
+      const [clipper] = await this.db
+        .select({ handle: schema.users.handle })
+        .from(schema.users)
+        .where(eq(schema.users.id, submission.fanId))
+        .limit(1);
+      const link = await this.fanvueLinks.createLink({
+        accessToken: creator.accessToken,
+        name: `${clipper?.handle ?? "clipper"} · ${campaign.title}`,
+        platform:
+          submission.platform as "tiktok" | "instagram" | "youtube",
+      });
+      await this.db
+        .update(schema.submissions)
+        .set({
+          trackingLinkUuid: link.uuid,
+          trackingLinkSlug: link.linkUrl,
+        })
+        .where(eq(schema.submissions.id, submission.id));
+      this.logger.log(
+        `Minted tracking link ${link.uuid} (${link.linkUrl}) for submission ${submission.id}`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Tracking link mint failed for submission ${submission.id}: ${err}`,
+      );
+      // Swallow — approval flow must succeed even if Fanvue is rate-limited.
+    }
   }
 
   async reject(id: string, creatorId: string, reason: string) {
@@ -1231,6 +1299,11 @@ export class SubmissionsService {
             lastPayoutAt: t.lastPayoutAt,
           };
         })(),
+        trackingLinkUuid: s.trackingLinkUuid,
+        trackingLinkSlug: s.trackingLinkSlug,
+        trackingLinkUrl: s.trackingLinkSlug
+          ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
+          : null,
       };
     });
   }

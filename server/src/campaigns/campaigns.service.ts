@@ -453,6 +453,8 @@ export class CampaignsService {
       status?: string;
       isPrivate?: boolean;
       acceptedPayoutMethods?: string[];
+      payoutType?: "per_1k_views" | "per_subscriber";
+      ratePerSub?: number;
     },
   ) {
     // v1.1: no escrow / wallet — campaigns publish directly to "active"
@@ -486,6 +488,8 @@ export class CampaignsService {
         allowedPlatforms: data.allowedPlatforms ?? [],
         acceptedPayoutMethods:
           (data.acceptedPayoutMethods as schema.PayoutMethod[]) ?? [],
+        payoutType: data.payoutType ?? "per_1k_views",
+        ratePerSubCents: Math.round((data.ratePerSub ?? 0) * 100),
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -848,6 +852,8 @@ export class CampaignsService {
       sourceThumbnailUrl: c.sourceThumbnailUrl,
       allowedPlatforms: c.allowedPlatforms,
       acceptedPayoutMethods: c.acceptedPayoutMethods,
+      payoutType: c.payoutType,
+      ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,
@@ -882,6 +888,8 @@ export class CampaignsService {
       sourceThumbnailUrl: c.sourceThumbnailUrl,
       allowedPlatforms: c.allowedPlatforms,
       acceptedPayoutMethods: c.acceptedPayoutMethods,
+      payoutType: c.payoutType,
+      ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,

@@ -59,6 +59,9 @@ export const users = pgTable("users", {
   // M2: clipper contact channel for off-platform payouts.
   contactChannel: text("contact_channel", { enum: CONTACT_CHANNELS }),
   contactValue: text("contact_value"),
+  // M4: persisted Fanvue OAuth state for tracking-link calls.
+  fanvueAccessToken: text("fanvue_access_token"),
+  fanvueScopes: text("fanvue_scopes").array().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -101,6 +104,15 @@ export const campaigns = pgTable("campaigns", {
     .$type<PayoutMethod[]>()
     .default([])
     .notNull(),
+  // M4: per-1k-views or per-subscriber payout. Default per-1k-views
+  // preserves the v1 model.
+  payoutType: text("payout_type", {
+    enum: ["per_1k_views", "per_subscriber"],
+  })
+    .default("per_1k_views")
+    .notNull(),
+  // M4: cents-per-sub rate when payoutType = per_subscriber.
+  ratePerSubCents: integer("rate_per_sub_cents").default(0).notNull(),
   status: text("status", {
     enum: ["draft", "pending_budget", "active", "paused", "completed"],
   })
@@ -176,6 +188,14 @@ export const submissions = pgTable("submissions", {
   postDeletedAt: timestamp("post_deleted_at", { withTimezone: true }),
   platformUsername: text("platform_username"),
   pendingEarningsCents: integer("pending_earnings_cents").default(0).notNull(),
+  // M4: Fanvue tracking-link minted per accepted clipper-per-campaign.
+  // Populated on submission approve for per-subscriber campaigns.
+  trackingLinkUuid: text("tracking_link_uuid"),
+  // The slug returned by Fanvue (e.g. 'fv-123'). Surfaced to the clipper
+  // alongside the resolved redirect URL.
+  trackingLinkSlug: text("tracking_link_slug"),
+  // Snapshot of acquired subscribers at the last attribution cron run.
+  lastAcquiredSubs: integer("last_acquired_subs").default(0).notNull(),
 });
 
 // ─── Submission View Snapshots ───────────────────────────────────────────────

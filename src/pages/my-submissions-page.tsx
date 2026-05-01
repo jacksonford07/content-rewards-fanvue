@@ -354,6 +354,14 @@ function SubmissionRow({ submission }: { submission: Submission }) {
             </div>
           )}
 
+          {/* M4.4 — tracking link surface for per-subscriber submissions */}
+          {submission.trackingLinkUrl && (
+            <TrackingLinkRow
+              url={submission.trackingLinkUrl}
+              slug={submission.trackingLinkSlug ?? ""}
+            />
+          )}
+
           {/* M3.5 — clipper confirmation prompt */}
           {submission.payoutEvent &&
             submission.status === "paid_off_platform" &&
@@ -445,6 +453,44 @@ function SubmissionRow({ submission }: { submission: Submission }) {
         />
       )}
     </Card>
+  )
+}
+
+function TrackingLinkRow({ url, slug }: { url: string; slug: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      toast.success("Tracking link copied")
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error("Couldn't copy")
+    }
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+      <span className="text-xs font-medium text-foreground">
+        Your Fanvue tracking link
+      </span>
+      <code className="font-mono text-[11px] text-muted-foreground">{slug}</code>
+      <span className="ml-auto flex gap-2">
+        <Button size="sm" variant="outline" asChild>
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <ArrowSquareOut className="size-3.5" />
+            Open
+          </a>
+        </Button>
+        <Button size="sm" onClick={handleCopy}>
+          {copied ? (
+            <CheckCircle weight="fill" className="size-3.5" />
+          ) : (
+            <CurrencyDollar weight="fill" className="size-3.5" />
+          )}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </span>
+    </div>
   )
 }
 

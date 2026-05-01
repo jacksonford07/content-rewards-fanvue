@@ -118,6 +118,8 @@ export class CampaignsController {
       status?: string;
       isPrivate?: boolean;
       acceptedPayoutMethods?: string[];
+      payoutType?: "per_1k_views" | "per_subscriber";
+      ratePerSub?: number;
     },
   ) {
     return this.campaignsService.create(req.user.id, body);

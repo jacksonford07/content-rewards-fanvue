@@ -22,6 +22,13 @@
       "when": 1777100000000,
       "tag": "0002_m2_off_platform_payouts",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777200000000,
+      "tag": "0003_m4_tracking_links",
+      "breakpoints": true
     }
   ]
 }
