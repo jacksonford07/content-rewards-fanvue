@@ -11,7 +11,8 @@ export interface AuthUser {
   isCreator: boolean
   role: string
 
-  walletBalance: number
+  fanvueScopes?: string[]
+
   createdAt: string
 }
 

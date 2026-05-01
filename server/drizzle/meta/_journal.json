@@ -8,6 +8,27 @@
       "when": 1776318551616,
       "tag": "0000_hot_absorbing_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777000000000,
+      "tag": "0001_m1_3_drop_wallet_kyc",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777100000000,
+      "tag": "0002_m2_off_platform_payouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777200000000,
+      "tag": "0003_m4_tracking_links",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,5 @@
+import type { PayoutMethod } from "@/lib/payout-validators"
+
 export type Platform = "tiktok" | "instagram" | "youtube"
 
 export type CampaignStatus =
@@ -13,8 +15,30 @@ export type SubmissionStatus =
   | "rejected"
   | "auto_approved"
   | "paid"
+  | "ready_to_pay"
+  | "paid_off_platform"
+  | "disputed"
 
 export type RequirementsType = "native" | "google_doc"
+
+export interface TrustWindow {
+  creatorPaidCount: number
+  creatorVerifiedCount: number
+  creatorPaidRate: number | null
+  clipperApprovedCount: number
+  clipperDecidedCount: number
+  clipperApprovalRate: number | null
+  clipperPaidCount: number
+  clipperDisputedCount: number
+  clipperDisputeFreeRate: number | null
+  clipperScore: number | null
+}
+
+export interface TrustScore {
+  ninetyDay: TrustWindow
+  allTime: TrustWindow
+  lastPayoutAt: string | null
+}
 
 export interface Creator {
   id: string
@@ -23,6 +47,7 @@ export interface Creator {
   avatarUrl: string
   verified?: boolean
   followers?: number
+  trust?: TrustScore | null
 }
 
 export interface Campaign {
@@ -46,6 +71,9 @@ export interface Campaign {
   status: CampaignStatus
   isPrivate?: boolean
   privateSlug?: string | null
+  acceptedPayoutMethods: PayoutMethod[]
+  payoutType: "per_1k_views" | "per_subscriber"
+  ratePerSub: number
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -90,6 +118,22 @@ export interface Submission {
   pendingEarnings?: number
   aiReviewResult?: "clean" | "flagged"
   aiNotes?: string
+  payoutEvent?: PayoutEventSummary | null
+  fanTrust?: TrustScore | null
+  trackingLinkUuid?: string | null
+  trackingLinkSlug?: string | null
+  trackingLinkUrl?: string | null
+}
+
+export interface PayoutEventSummary {
+  id: string
+  method: PayoutMethod
+  amountCents: number
+  createdAt: string
+  confirmedAt: string | null
+  disputedAt: string | null
+  disputeResolution: "confirmed" | "rejected" | null
+  txHash: string | null
 }
 
 export interface SubmissionSnapshot {
@@ -98,13 +142,3 @@ export interface SubmissionSnapshot {
   available: boolean
 }
 
-export type KycStatus = "not_started" | "in_progress" | "verified" | "rejected"
-
-export interface BudgetTransaction {
-  id: string
-  type: "escrow_lock" | "payout_release" | "topup" | "refund"
-  description: string
-  amount: number
-  at: string
-  status: "completed" | "pending"
-}

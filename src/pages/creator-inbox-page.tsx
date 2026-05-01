@@ -71,6 +71,9 @@ import {
   type InboxTab,
 } from "@/queries/submissions"
 import { PaginationBar } from "@/components/pagination-bar"
+import { MarkPaidDialog } from "@/components/mark-paid-dialog"
+import { TrustBadge } from "@/components/trust-badge"
+import { analytics } from "@/lib/analytics"
 import type { Submission } from "@/lib/types"
 
 type TabKey = InboxTab
@@ -79,7 +82,9 @@ const tabConfig: { key: TabKey; label: string }[] = [
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved" },
   { key: "verify", label: "Ready to verify" },
+  { key: "ready_to_pay", label: "Ready to pay" },
   { key: "paid", label: "Paid" },
+  { key: "disputed", label: "Disputed" },
   { key: "rejected", label: "Rejected" },
   { key: "banned", label: "Banned" },
 ]
@@ -88,7 +93,9 @@ const validTabs: TabKey[] = [
   "pending",
   "approved",
   "verify",
+  "ready_to_pay",
   "paid",
+  "disputed",
   "rejected",
   "banned",
 ]
@@ -116,6 +123,7 @@ export function CreatorInboxPage() {
   }, [searchParams])
   const [rejectOpen, setRejectOpen] = useState<Submission | null>(null)
   const [banOpen, setBanOpen] = useState<Submission | null>(null)
+  const [markPaidOpen, setMarkPaidOpen] = useState<Submission | null>(null)
   const [rejectReason, setRejectReason] = useState("")
   const [banReason, setBanReason] = useState("")
 
@@ -124,7 +132,9 @@ export function CreatorInboxPage() {
     pending: 1,
     approved: 1,
     verify: 1,
+    ready_to_pay: 1,
     paid: 1,
+    disputed: 1,
     rejected: 1,
     banned: 1,
   })
@@ -145,7 +155,9 @@ export function CreatorInboxPage() {
     pending: stats?.pending ?? 0,
     approved: stats?.approved ?? 0,
     verify: stats?.verify ?? 0,
+    ready_to_pay: stats?.ready_to_pay ?? 0,
     paid: stats?.paid ?? 0,
+    disputed: stats?.disputed ?? 0,
     rejected: stats?.rejected ?? 0,
     banned: stats?.banned ?? 0,
   }
@@ -160,6 +172,14 @@ export function CreatorInboxPage() {
   const approve = async (s: Submission) => {
     try {
       await approveMutation.mutateAsync(s.id)
+      analytics.submissionApproved({
+        submission_id: s.id,
+        campaign_id: s.campaignId,
+        // We don't have payoutType on Submission; default to per_1k_views
+        // — most accurate when M5 dashboards filter by payout_type.
+        // Improve in a follow-up by enriching Submission with campaign.payoutType.
+        payout_type: "per_1k_views",
+      })
       toast.success("Submission approved", {
         description: `${s.fanName}'s clip entered 30-day view verification.`,
       })
@@ -284,7 +304,9 @@ export function CreatorInboxPage() {
               onBan={() => setBanOpen(s)}
               onVerifyViews={(views) => verifyViews(s, views)}
               onFastForward={() => fastForward(s)}
+              onMarkPaid={() => setMarkPaidOpen(s)}
               showVerify={tab === "verify"}
+              showMarkPaid={s.status === "ready_to_pay"}
             />
           ))}
         </div>
@@ -369,6 +391,12 @@ export function CreatorInboxPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MarkPaidDialog
+        submissionId={markPaidOpen?.id ?? null}
+        open={!!markPaidOpen}
+        onOpenChange={(v) => !v && setMarkPaidOpen(null)}
+      />
     </div>
   )
 }
@@ -388,7 +416,9 @@ function InboxRow({
   onBan,
   onVerifyViews,
   onFastForward,
+  onMarkPaid,
   showVerify,
+  showMarkPaid,
 }: {
   submission: Submission
   onApprove: () => void
@@ -396,7 +426,9 @@ function InboxRow({
   onBan: () => void
   onVerifyViews: (views: number) => Promise<void>
   onFastForward: () => void
+  onMarkPaid: () => void
   showVerify: boolean
+  showMarkPaid: boolean
 }) {
   const [viewsInput, setViewsInput] = useState("")
   const [confirming, setConfirming] = useState(false)
@@ -487,8 +519,17 @@ function InboxRow({
                 <AvatarImage src={submission.fanAvatarUrl} />
                 <AvatarFallback>{submission.fanName.charAt(0)}</AvatarFallback>
               </Avatar>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{submission.fanName}</p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-semibold">
+                    {submission.fanName}
+                  </p>
+                  <TrustBadge
+                    trust={submission.fanTrust}
+                    side="clipper"
+                    variant="inbox-row"
+                  />
+                </div>
                 <p className="truncate text-xs text-muted-foreground">
                   @{submission.fanHandle} · {platformLabels[submission.platform]}
                   {submission.platformUsername
@@ -588,7 +629,13 @@ function InboxRow({
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {!readOnly && !showVerify && (
+            {showMarkPaid && (
+              <Button size="sm" onClick={onMarkPaid}>
+                <CheckCircle weight="fill" className="size-4" />
+                Mark paid
+              </Button>
+            )}
+            {!readOnly && !showVerify && !showMarkPaid && (
               <>
                 <Button size="sm" onClick={onApprove}>
                   <CheckCircle weight="fill" className="size-4" />

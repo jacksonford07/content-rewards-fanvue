@@ -48,13 +48,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Alert,
@@ -72,6 +65,10 @@ import {
 } from "@/lib/mock-data"
 import { useCampaign, useCampaignSourceStatus } from "@/queries/campaigns"
 import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
+import { usePayoutSettings } from "@/queries/payout-methods"
+import { payoutMethodLabel } from "@/lib/payout-validators"
+import { TrustBadge } from "@/components/trust-badge"
+import { analytics } from "@/lib/analytics"
 import { QK } from "@/lib/query-keys"
 import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
@@ -89,6 +86,7 @@ export function CampaignDetailPage() {
   const [linkCopied, setLinkCopied] = useState(false)
 
   const { data: campaign, isError: campaignError } = useCampaign(id)
+  const { data: payoutSettings } = usePayoutSettings()
   const { data: myResp } = useMySubmissions({
     tab: "all",
     page: 1,
@@ -133,7 +131,21 @@ export function CampaignDetailPage() {
     return null
   }, [postUrl, detectedPlatform, campaign, platform])
 
-  const formValid = postUrl.trim() && platform && acked && !urlError
+  // M2.3 — overlap check between creator's accepted methods and the
+  // clipper's saved methods. Empty acceptedPayoutMethods means legacy
+  // campaign with no constraint (treat as overlap-OK).
+  const clipperMethods = payoutSettings?.methods.map((m) => m.method) ?? []
+  const campaignMethods = campaign?.acceptedPayoutMethods ?? []
+  const hasMethodOverlap =
+    campaignMethods.length === 0 ||
+    campaignMethods.some((m) => clipperMethods.includes(m))
+  const missingMethodsHint =
+    campaignMethods.length === 0
+      ? null
+      : campaignMethods.map((m) => payoutMethodLabel(m)).join(", ")
+
+  const formValid =
+    postUrl.trim() && platform && acked && !urlError && hasMethodOverlap
 
   // Extract Google Drive file ID from URL
   const driveFileId = useMemo(() => {
@@ -314,7 +326,8 @@ export function CampaignDetailPage() {
     !isBannedFromCampaign &&
     !viewerIsCreatorRole &&
     !sourceMissing &&
-    !sourceChecking
+    !sourceChecking &&
+    hasMethodOverlap
   const shareUrl = campaign.privateSlug
     ? `${window.location.origin}/c/${campaign.privateSlug}`
     : null
@@ -353,10 +366,17 @@ export function CampaignDetailPage() {
   const handleSubmit = async () => {
     if (!campaign) return
     try {
-      await submitMutation.mutateAsync({
+      const result = await submitMutation.mutateAsync({
         campaignId: campaign.id,
         postUrl,
         platform: platform as Platform,
+      })
+      const submissionId =
+        (result as { id?: string } | undefined)?.id ?? "unknown"
+      analytics.submissionCreated({
+        submission_id: submissionId,
+        campaign_id: campaign.id,
+        platform: platform as string,
       })
       setSubmitOpen(false)
       setPostUrl("")
@@ -372,6 +392,13 @@ export function CampaignDetailPage() {
     }
   }
 
+  // B1: route the breadcrumb / Back link based on whether the viewer owns
+  // the campaign. Creators land here from "My campaigns" and expect to
+  // bounce back there; clippers land from the hub.
+  const viewerOwnsCampaign = user?.id === campaign.creator?.id
+  const backHref = viewerOwnsCampaign ? "/creator/campaigns" : "/"
+  const backLabel = viewerOwnsCampaign ? "My campaigns" : "Hub"
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
       <div className="mb-6 flex items-center justify-between">
@@ -379,7 +406,7 @@ export function CampaignDetailPage() {
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
-                <Link to="/">Hub</Link>
+                <Link to={backHref}>{backLabel}</Link>
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -391,7 +418,7 @@ export function CampaignDetailPage() {
           </BreadcrumbList>
         </Breadcrumb>
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/">
+          <Link to={backHref}>
             <ArrowLeft className="size-4" />
             Back
           </Link>
@@ -547,31 +574,38 @@ export function CampaignDetailPage() {
 
           {/* Creator card */}
           <Card className="border-border/60 bg-card/70 backdrop-blur">
-            <CardContent className="flex items-center gap-4 p-4">
-              <Avatar className="size-10 ring-2 ring-primary/20">
-                <AvatarImage src={campaign.creator.avatarUrl} />
-                <AvatarFallback>
-                  {campaign.creator.name.charAt(0)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-sm font-semibold">
-                    {campaign.creator.name}
+            <CardContent className="space-y-3 p-4">
+              <div className="flex items-center gap-4">
+                <Avatar className="size-10 ring-2 ring-primary/20">
+                  <AvatarImage src={campaign.creator.avatarUrl} />
+                  <AvatarFallback>
+                    {campaign.creator.name.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-sm font-semibold">
+                      {campaign.creator.name}
+                    </p>
+                    {campaign.creator.verified && (
+                      <SealCheck
+                        weight="fill"
+                        className="size-4 text-primary"
+                      />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    @{campaign.creator.handle} ·{" "}
+                    {formatCompactNumber(campaign.creator.followers ?? 0)}{" "}
+                    followers
                   </p>
-                  {campaign.creator.verified && (
-                    <SealCheck
-                      weight="fill"
-                      className="size-4 text-primary"
-                    />
-                  )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  @{campaign.creator.handle} ·{" "}
-                  {formatCompactNumber(campaign.creator.followers ?? 0)}{" "}
-                  followers
-                </p>
               </div>
+              <TrustBadge
+                trust={campaign.creator.trust}
+                side="creator"
+                variant="detail"
+              />
             </CardContent>
           </Card>
 
@@ -873,6 +907,23 @@ export function CampaignDetailPage() {
                 )
               ) : (
                 <>
+                  {!hasMethodOverlap && missingMethodsHint && (
+                    <Alert className="mt-6 border-warning/40 bg-warning/5">
+                      <Info className="size-4 text-warning" />
+                      <AlertTitle>You can't submit yet</AlertTitle>
+                      <AlertDescription>
+                        This creator pays in <strong>{missingMethodsHint}</strong>.
+                        Add one of these to your{" "}
+                        <Link
+                          to="/settings/payout"
+                          className="font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          payout settings
+                        </Link>{" "}
+                        to submit.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <Button
                     className="mt-6 w-full"
                     size="lg"
@@ -1026,27 +1077,6 @@ export function CampaignDetailPage() {
                   Detected {platformLabels[detectedPlatform]}
                 </p>
               ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label>Platform</Label>
-              <Select
-                value={platform}
-                onValueChange={(v) => setPlatform(v as Platform)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose platform" />
-                </SelectTrigger>
-                <SelectContent>
-                  {campaign.allowedPlatforms.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      <div className="flex items-center gap-2">
-                        <PlatformIcon platform={p} />
-                        {platformLabels[p]}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <Separator />

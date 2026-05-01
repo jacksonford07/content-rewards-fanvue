@@ -5,6 +5,11 @@ import * as schema from "../db/schema.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { SubmissionsService } from "../submissions/submissions.service.js";
+import {
+  FanvueAuthError,
+  FanvueScopeError,
+  FanvueTrackingLinksService,
+} from "../fanvue/fanvue-tracking-links.service.js";
 
 @Injectable()
 export class CronService {
@@ -15,7 +20,133 @@ export class CronService {
     private notifications: NotificationsService,
     private scrapers: ScrapersService,
     private submissions: SubmissionsService,
+    private fanvueLinks: FanvueTrackingLinksService,
   ) {}
+
+  /**
+   * M4.5 — Subscriber attribution cron.
+   *
+   * Once per cron run (every 6h alongside the view-tracking cron),
+   * iterates per creator that owns at least one active per-subscriber
+   * submission, fetches the creator's tracking links from Fanvue, and
+   * applies pro-rata pool accrual on the delta of acquired_subscribers
+   * since the last scrape.
+   *
+   * Skips per-view campaigns entirely.
+   */
+  async syncSubscriberAttribution() {
+    // Pull every active per-sub submission with a minted link.
+    const rows = await this.db
+      .select({
+        submission: schema.submissions,
+        campaign: schema.campaigns,
+      })
+      .from(schema.submissions)
+      .innerJoin(
+        schema.campaigns,
+        eq(schema.campaigns.id, schema.submissions.campaignId),
+      )
+      .where(
+        and(
+          eq(schema.campaigns.payoutType, "per_subscriber"),
+          eq(schema.campaigns.status, "active"),
+          inArray(schema.submissions.status, [
+            "approved",
+            "auto_approved",
+          ]),
+          sql`${schema.submissions.trackingLinkUuid} IS NOT NULL`,
+        ),
+      );
+
+    if (rows.length === 0) {
+      return { updated: 0, errors: 0 };
+    }
+
+    // Group by creator so we make at most one GET /tracking-links call per
+    // creator per run.
+    const byCreator = new Map<
+      string,
+      { campaign: typeof schema.campaigns.$inferSelect; submissions: typeof schema.submissions.$inferSelect[] }[]
+    >();
+    for (const r of rows) {
+      const list = byCreator.get(r.campaign.creatorId) ?? [];
+      const existingGroup = list.find(
+        (g) => g.campaign.id === r.campaign.id,
+      );
+      if (existingGroup) {
+        existingGroup.submissions.push(r.submission);
+      } else {
+        list.push({ campaign: r.campaign, submissions: [r.submission] });
+      }
+      byCreator.set(r.campaign.creatorId, list);
+    }
+
+    let updated = 0;
+    let errors = 0;
+
+    for (const [creatorId, groups] of byCreator) {
+      try {
+        const [creator] = await this.db
+          .select({ accessToken: schema.users.fanvueAccessToken })
+          .from(schema.users)
+          .where(eq(schema.users.id, creatorId))
+          .limit(1);
+        if (!creator?.accessToken) continue;
+
+        const links = await this.fanvueLinks.listAllLinks({
+          accessToken: creator.accessToken,
+        });
+        const linksByUuid = new Map(links.map((l) => [l.uuid, l]));
+
+        for (const group of groups) {
+          for (const sub of group.submissions) {
+            if (!sub.trackingLinkUuid) continue;
+            const link = linksByUuid.get(sub.trackingLinkUuid);
+            if (!link) continue;
+            const acquired = Math.floor(link.engagement.acquiredSubscribers);
+            const delta = Math.max(0, acquired - sub.lastAcquiredSubs);
+            if (delta === 0) continue;
+            const earnedCents = Math.round(
+              delta * group.campaign.ratePerSubCents,
+            );
+            // Cap by remaining budget — pro-rata pool model.
+            const remainingCents = Math.max(
+              group.campaign.totalBudgetCents -
+                group.campaign.budgetSpentCents,
+              0,
+            );
+            const creditCents = Math.min(earnedCents, remainingCents);
+            await this.db
+              .update(schema.submissions)
+              .set({
+                lastAcquiredSubs: acquired,
+                pendingEarningsCents: sql`${schema.submissions.pendingEarningsCents} + ${creditCents}`,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.submissions.id, sub.id));
+            updated++;
+          }
+        }
+      } catch (err) {
+        if (err instanceof FanvueAuthError) {
+          this.logger.warn(
+            `Fanvue token rejected for creator ${creatorId}; skipping until re-auth`,
+          );
+        } else if (err instanceof FanvueScopeError) {
+          this.logger.warn(
+            `Creator ${creatorId} missing scope ${err.requiredScope}`,
+          );
+        } else {
+          this.logger.error(
+            `Sub attribution failed for creator ${creatorId}: ${err}`,
+          );
+        }
+        errors++;
+      }
+    }
+
+    return { updated, errors };
+  }
 
   async autoApprove() {
     const now = new Date();

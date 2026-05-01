@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { SubmissionsService } from "./submissions.service.js";
+import type { PayoutMethod } from "../users/payout-validators.js";
 
 @Controller("submissions")
 export class SubmissionsController {
@@ -116,5 +117,53 @@ export class SubmissionsController {
     @Req() req: { user: { id: string } },
   ) {
     return this.submissionsService.getSnapshots(id, req.user.id);
+  }
+
+  // M2.4 — Off-platform payout context for the mark-paid modal.
+  // Returns clipper's saved payout methods + contact and the campaign's
+  // accepted methods so the UI can pre-fill the form.
+  @Get(":id/payout-context")
+  payoutContext(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.submissionsService.getPayoutContext(id, req.user.id);
+  }
+
+  @Post(":id/mark-paid")
+  markPaid(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+    @Body()
+    body: {
+      method: PayoutMethod;
+      value: string;
+      reference?: string;
+      txHash?: string;
+    },
+  ) {
+    return this.submissionsService.markPaid(id, req.user.id, body);
+  }
+
+  // M3.5 — clipper confirms / disputes a payout.
+  @Post(":id/confirm-payout")
+  confirmPayout(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.submissionsService.confirmPayout(id, req.user.id);
+  }
+
+  @Post(":id/dispute-payout")
+  disputePayout(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+    @Body() body: { reason?: string },
+  ) {
+    return this.submissionsService.disputePayout(
+      id,
+      req.user.id,
+      body.reason,
+    );
   }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import api from "@/lib/api"
 import { AuthContext, type AuthUser } from "@/hooks/use-auth"
+import { identify, resetIdentity } from "@/lib/analytics"
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -16,6 +17,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.get("/auth/me")
       setUser(res.data)
+      // M5.1 — re-identify on every auth resolve. Idempotent in PostHog.
+      if (res.data?.id) identify(res.data.id)
     } catch {
       localStorage.removeItem("cr_token")
       setUser(null)
@@ -31,6 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     localStorage.removeItem("cr_token")
     setUser(null)
+    resetIdentity()
   }
 
   return (

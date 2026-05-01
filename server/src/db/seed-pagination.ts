@@ -45,7 +45,7 @@ async function main() {
   const existingCreators = await db
     .select()
     .from(schema.users)
-    .where(eq(schema.users.isCreator, true));
+    .where(eq(schema.users.role, "creator"));
 
   const thumbs = [
     "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80",
@@ -174,7 +174,6 @@ async function main() {
           displayName: f.name,
           avatarUrl: `https://api.dicebear.com/9.x/glass/svg?seed=${f.seed}&backgroundColor=b8a5d4`,
           role: "clipper" as const,
-          walletBalanceCents: 5000,
         })),
       )
       .returning();
@@ -193,7 +192,7 @@ async function main() {
     const bucket = i % 5; // 0 pending, 1 approved, 2 verify-ready, 3 paid, 4 rejected
     const createdAt = daysAgo(40 - (i % 35));
 
-    let status: "pending" | "approved" | "paid" | "rejected" = "pending";
+    let status: "pending" | "approved" | "paid_off_platform" | "rejected" = "pending";
     let creatorDecisionAt: Date | null = null;
     let verificationStartedAt: Date | null = null;
     let lockDate: Date | null = null;
@@ -224,7 +223,7 @@ async function main() {
         break;
       }
       case 3: {
-        status = "paid";
+        status = "paid_off_platform";
         creatorDecisionAt = daysAgo(45 + (i % 10));
         verificationStartedAt = creatorDecisionAt;
         lockDate = daysAgo(10 + (i % 5));
@@ -279,7 +278,7 @@ async function main() {
     const bucket = i % 5;
     const createdAt = daysAgo(38 - (i % 32));
 
-    let status: "pending" | "approved" | "paid" | "rejected" = "pending";
+    let status: "pending" | "approved" | "paid_off_platform" | "rejected" = "pending";
     let creatorDecisionAt: Date | null = null;
     let verificationStartedAt: Date | null = null;
     let lockDate: Date | null = null;
@@ -306,7 +305,7 @@ async function main() {
         lockDate = daysAgo(1);
         break;
       case 3:
-        status = "paid";
+        status = "paid_off_platform";
         creatorDecisionAt = daysAgo(50 + (i % 5));
         verificationStartedAt = creatorDecisionAt;
         lockDate = daysAgo(15 + (i % 5));
@@ -441,55 +440,6 @@ async function main() {
 
   await db.insert(schema.notifications).values(notifRows);
   console.log(`✓ inserted ${notifRows.length} notifications`);
-
-  // ─── Wallet transactions ───────────────────────────────────────────────────
-  console.log("Creating 40+ wallet transactions for each dev user...");
-  const walletRows: (typeof schema.walletTransactions.$inferInsert)[] = [];
-
-  for (let i = 0; i < 40; i++) {
-    walletRows.push({
-      userId: devClipper.id,
-      type: i % 4 === 0 ? "topup" : i % 4 === 1 ? "payout" : i % 4 === 2 ? "withdrawal" : "payout",
-      description:
-        i % 4 === 0
-          ? `Wallet top-up: $${100 + i * 10}`
-          : i % 4 === 2
-            ? `Withdrawal: $${50 + i * 5}`
-            : `Payout for campaign — ${5 + i * 2}K views`,
-      amountCents:
-        i % 4 === 0
-          ? 10000 + i * 1000
-          : i % 4 === 2
-            ? -(5000 + i * 500)
-            : 1500 + i * 250,
-      status: "completed",
-      createdAt: hoursAgo(i * 6),
-    });
-  }
-
-  for (let i = 0; i < 40; i++) {
-    walletRows.push({
-      userId: devCreator.id,
-      type: i % 3 === 0 ? "topup" : "escrow_lock",
-      description:
-        i % 3 === 0
-          ? `Wallet top-up: $${500 + i * 50}`
-          : `Budget funded for Dev Creator campaign #${(i % 15) + 1}`,
-      amountCents: i % 3 === 0 ? 50000 + i * 5000 : -(20000 + i * 2000),
-      status: "completed",
-      campaignId:
-        i % 3 === 0
-          ? null
-          : pick(
-              campaigns.filter((c) => c.creatorId === devCreator.id),
-              i,
-            )?.id ?? null,
-      createdAt: hoursAgo(i * 5),
-    });
-  }
-
-  await db.insert(schema.walletTransactions).values(walletRows);
-  console.log(`✓ inserted ${walletRows.length} wallet transactions`);
 
   console.log("✅ Pagination seed complete!");
 }
