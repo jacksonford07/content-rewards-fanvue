@@ -142,6 +142,25 @@ export class SubmissionsService {
 
     if (ban) throw new ForbiddenException("You are banned from this campaign");
 
+    // M2.3 — payout-method overlap gate. Clipper must have at least one
+    // method that the campaign accepts; otherwise day-30 has nothing to
+    // settle on. Defence-in-depth — frontend also gates the submit button.
+    if (campaign.acceptedPayoutMethods.length > 0) {
+      const clipperMethods = await this.db
+        .select({ method: schema.clipperPayoutMethods.method })
+        .from(schema.clipperPayoutMethods)
+        .where(eq(schema.clipperPayoutMethods.userId, fanId));
+      const clipperSet = new Set(clipperMethods.map((m) => m.method));
+      const overlap = campaign.acceptedPayoutMethods.some((m) =>
+        clipperSet.has(m),
+      );
+      if (!overlap) {
+        throw new BadRequestException(
+          `This creator pays in ${campaign.acceptedPayoutMethods.join(", ")}. Add one of these to your payout settings to submit.`,
+        );
+      }
+    }
+
     const autoApproveAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const postUrl = await resolveShortUrl(data.postUrl);
 

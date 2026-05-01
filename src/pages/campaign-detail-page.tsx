@@ -65,6 +65,8 @@ import {
 } from "@/lib/mock-data"
 import { useCampaign, useCampaignSourceStatus } from "@/queries/campaigns"
 import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
+import { usePayoutSettings } from "@/queries/payout-methods"
+import { payoutMethodLabel } from "@/lib/payout-validators"
 import { QK } from "@/lib/query-keys"
 import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
@@ -82,6 +84,7 @@ export function CampaignDetailPage() {
   const [linkCopied, setLinkCopied] = useState(false)
 
   const { data: campaign, isError: campaignError } = useCampaign(id)
+  const { data: payoutSettings } = usePayoutSettings()
   const { data: myResp } = useMySubmissions({
     tab: "all",
     page: 1,
@@ -126,7 +129,21 @@ export function CampaignDetailPage() {
     return null
   }, [postUrl, detectedPlatform, campaign, platform])
 
-  const formValid = postUrl.trim() && platform && acked && !urlError
+  // M2.3 — overlap check between creator's accepted methods and the
+  // clipper's saved methods. Empty acceptedPayoutMethods means legacy
+  // campaign with no constraint (treat as overlap-OK).
+  const clipperMethods = payoutSettings?.methods.map((m) => m.method) ?? []
+  const campaignMethods = campaign?.acceptedPayoutMethods ?? []
+  const hasMethodOverlap =
+    campaignMethods.length === 0 ||
+    campaignMethods.some((m) => clipperMethods.includes(m))
+  const missingMethodsHint =
+    campaignMethods.length === 0
+      ? null
+      : campaignMethods.map((m) => payoutMethodLabel(m)).join(", ")
+
+  const formValid =
+    postUrl.trim() && platform && acked && !urlError && hasMethodOverlap
 
   // Extract Google Drive file ID from URL
   const driveFileId = useMemo(() => {
@@ -307,7 +324,8 @@ export function CampaignDetailPage() {
     !isBannedFromCampaign &&
     !viewerIsCreatorRole &&
     !sourceMissing &&
-    !sourceChecking
+    !sourceChecking &&
+    hasMethodOverlap
   const shareUrl = campaign.privateSlug
     ? `${window.location.origin}/c/${campaign.privateSlug}`
     : null
@@ -873,6 +891,23 @@ export function CampaignDetailPage() {
                 )
               ) : (
                 <>
+                  {!hasMethodOverlap && missingMethodsHint && (
+                    <Alert className="mt-6 border-warning/40 bg-warning/5">
+                      <Info className="size-4 text-warning" />
+                      <AlertTitle>You can't submit yet</AlertTitle>
+                      <AlertDescription>
+                        This creator pays in <strong>{missingMethodsHint}</strong>.
+                        Add one of these to your{" "}
+                        <Link
+                          to="/settings/payout"
+                          className="font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          payout settings
+                        </Link>{" "}
+                        to submit.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <Button
                     className="mt-6 w-full"
                     size="lg"
