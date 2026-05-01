@@ -21,6 +21,7 @@ import { CreatorAnalyticsPage } from "@/pages/creator-analytics-page"
 import { NotificationsPage } from "@/pages/notifications-page"
 import { CampaignBudgetPage } from "@/pages/campaign-budget-page"
 import { PayoutSettingsPage } from "@/pages/payout-settings-page"
+import { AdminDisputesPage } from "@/pages/admin-disputes-page"
 
 import { RoleSelectPage } from "@/pages/role-select-page"
 
@@ -79,6 +80,7 @@ export default function App() {
                 path="creator/analytics"
                 element={<CreatorAnalyticsPage />}
               />
+              <Route path="admin/disputes" element={<AdminDisputesPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
