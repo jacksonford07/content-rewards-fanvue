@@ -4,7 +4,6 @@ export const QK = {
     mine: "campaigns.mine",
     mineStats: "campaigns.mine.stats",
     byId: "campaigns.byId",
-    transactions: "campaigns.transactions",
   },
   submissions: {
     mine: "submissions.mine",

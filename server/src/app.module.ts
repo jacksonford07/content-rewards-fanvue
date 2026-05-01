@@ -8,7 +8,6 @@ import { DbModule } from "./db/db.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
 import { SubmissionsModule } from "./submissions/submissions.module.js";
 import { UsersModule } from "./users/users.module.js";
-import { WalletModule } from "./wallet/wallet.module.js";
 
 @Module({
   imports: [
@@ -18,7 +17,6 @@ import { WalletModule } from "./wallet/wallet.module.js";
     UsersModule,
     CampaignsModule,
     SubmissionsModule,
-    WalletModule,
     NotificationsModule,
     AnalyticsModule,
     CronModule,

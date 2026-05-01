@@ -734,28 +734,25 @@ export class SubmissionsService {
       .limit(1);
     const payoutCents = fresh?.pending ?? 0;
 
-    // Update submission — clear pending earnings since they've been settled
+    // v1.1: payouts move off-platform. Day-30 lock flips the submission
+    // to 'ready_to_pay' and surfaces the accrued amount to the creator,
+    // who marks it paid via the M2 mark-paid flow once they've sent funds
+    // out-of-band. No in-app wallet credit, no escrow ledger writes.
     await this.db
       .update(schema.submissions)
       .set({
-        status: "paid",
+        status: "ready_to_pay",
         viewsAtDay30: views,
         payoutAmountCents: payoutCents,
-        pendingEarningsCents: 0,
         updatedAt: new Date(),
       })
       .where(eq(schema.submissions.id, submission.id));
 
     if (payoutCents > 0) {
-      // Credit clipper wallet
-      await this.db
-        .update(schema.users)
-        .set({
-          walletBalanceCents: sql`${schema.users.walletBalanceCents} + ${payoutCents}`,
-        })
-        .where(eq(schema.users.id, submission.fanId));
-
-      // Update campaign budget spent
+      // Track committed budget so the campaign-level "spent" view stays
+      // accurate. Once M2 ships the actual mark-paid flow, this column
+      // moves to track confirmed off-platform payouts only; for now it
+      // tracks day-30 commitments.
       await this.db
         .update(schema.campaigns)
         .set({
@@ -764,30 +761,16 @@ export class SubmissionsService {
         })
         .where(eq(schema.campaigns.id, submission.campaignId));
 
-      // Wallet transaction for clipper
-      await this.db.insert(schema.walletTransactions).values({
-        userId: submission.fanId,
-        campaignId: submission.campaignId,
-        type: "payout",
-        description: `Payout for "${campaign.title}" — ${(views / 1000).toFixed(1)}K views`,
-        amountCents: payoutCents,
-      });
-
-      // Campaign transaction
-      await this.db.insert(schema.campaignTransactions).values({
-        campaignId: submission.campaignId,
-        type: "payout_release",
-        description: `Payout — ${(views / 1000).toFixed(1)}K views`,
-        amountCents: -payoutCents,
-      });
-
-      // Notify clipper
       await this.notifications.create({
         userId: submission.fanId,
         type: "payout_released",
-        title: `Payout released: $${(payoutCents / 100).toFixed(2)}`,
-        message: `Your earnings from "${campaign.title}" have been credited to your wallet.`,
-        actionUrl: "/wallet",
+        title: `Ready to pay: $${(payoutCents / 100).toFixed(2)}`,
+        message: `Your 30-day window on "${campaign.title}" has closed. ${
+          campaign.title
+        }'s creator will pay you $${(payoutCents / 100).toFixed(
+          2,
+        )} off-platform.`,
+        actionUrl: "/submissions",
       });
     }
 
@@ -797,7 +780,7 @@ export class SubmissionsService {
     return {
       views,
       payoutAmount: payoutCents / 100,
-      status: "paid",
+      status: "ready_to_pay",
     };
   }
 

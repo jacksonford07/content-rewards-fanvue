@@ -135,37 +135,12 @@ export class CampaignsController {
     );
   }
 
-  @Post(":id/fund")
-  fund(
-    @Param("id") id: string,
-    @Req() req: { user: { id: string } },
-    @Body() body: { amount: number },
-  ) {
-    return this.campaignsService.fund(id, req.user.id, body.amount);
-  }
-
   @Post(":id/pause")
   pause(
     @Param("id") id: string,
     @Req() req: { user: { id: string } },
   ) {
     return this.campaignsService.togglePause(id, req.user.id);
-  }
-
-  @Post(":id/complete")
-  complete(
-    @Param("id") id: string,
-    @Req() req: { user: { id: string } },
-  ) {
-    return this.campaignsService.completeAndRefund(id, req.user.id);
-  }
-
-  @Get(":id/transactions")
-  getTransactions(
-    @Param("id") id: string,
-    @Req() req: { user: { id: string } },
-  ) {
-    return this.campaignsService.getTransactions(id, req.user.id);
   }
 
   @Delete(":id")

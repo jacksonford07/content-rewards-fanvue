@@ -413,8 +413,11 @@ export class CampaignsService {
       isPrivate?: boolean;
     },
   ) {
-    const status =
-      data.status === "pending_budget" ? "pending_budget" : "draft";
+    // v1.1: no escrow / wallet — campaigns publish directly to "active"
+    // when the creator hits Publish; otherwise stay as "draft".
+    const requestedStatus = data.status;
+    const status: "draft" | "active" =
+      requestedStatus === "active" ? "active" : "draft";
     const isPrivate = data.isPrivate === true;
     const [campaign] = await this.db
       .insert(schema.campaigns)
@@ -430,7 +433,7 @@ export class CampaignsService {
         sourceThumbnailUrl: data.sourceThumbnailUrl,
         allowedPlatforms: data.allowedPlatforms ?? [],
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
-        totalBudgetCents: 0,
+        totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
         maxPayoutPerClipCents: data.maxPayoutPerClip
           ? Math.round(data.maxPayoutPerClip * 100)
@@ -438,6 +441,7 @@ export class CampaignsService {
         status,
         isPrivate,
         privateSlug: isPrivate ? generatePrivateSlug() : null,
+        goesLiveAt: status === "active" ? new Date() : null,
       })
       .returning();
 
@@ -522,8 +526,10 @@ export class CampaignsService {
           updateData.privateSlug = null;
         }
       }
-      if (data.status === "pending_budget")
-        updateData.status = "pending_budget";
+      if (data.status === "active") {
+        updateData.status = "active";
+        if (!existing.goesLiveAt) updateData.goesLiveAt = new Date();
+      }
     }
 
     const [campaign] = await this.db
@@ -533,160 +539,6 @@ export class CampaignsService {
       .returning();
 
     return this.serializeSingle(campaign!);
-  }
-
-  async fund(id: string, creatorId: string, amountDollars: number) {
-    const [campaign] = await this.db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, id))
-      .limit(1);
-
-    if (!campaign) throw new NotFoundException("Campaign not found");
-    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
-
-    const amountCents = Math.round(amountDollars * 100);
-
-    // Check wallet balance
-    const [user] = await this.db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, creatorId))
-      .limit(1);
-
-    if (!user || user.walletBalanceCents < amountCents) {
-      throw new BadRequestException("Insufficient wallet balance");
-    }
-
-    // Deduct from wallet
-    await this.db
-      .update(schema.users)
-      .set({
-        walletBalanceCents: sql`${schema.users.walletBalanceCents} - ${amountCents}`,
-      })
-      .where(eq(schema.users.id, creatorId));
-
-    // Add to campaign budget — activate on first fund, keep active on top-ups
-    const isFirstFund =
-      campaign.status === "pending_budget" || campaign.status === "draft";
-    const updateData: Record<string, unknown> = {
-      // First fund: SET budget (draft may already store intended amount)
-      // Top-ups: ADD to existing budget
-      totalBudgetCents: isFirstFund
-        ? amountCents
-        : sql`${schema.campaigns.totalBudgetCents} + ${amountCents}`,
-      updatedAt: new Date(),
-    };
-    if (isFirstFund) {
-      updateData.status = "active";
-      updateData.goesLiveAt = new Date();
-    }
-    // If campaign was completed but creator tops up, reactivate
-    if (campaign.status === "completed") {
-      updateData.status = "active";
-    }
-
-    await this.db
-      .update(schema.campaigns)
-      .set(updateData)
-      .where(eq(schema.campaigns.id, id));
-
-    // Record wallet transaction
-    await this.db.insert(schema.walletTransactions).values({
-      userId: creatorId,
-      campaignId: id,
-      type: "escrow_lock",
-      description: `Budget funded for "${campaign.title}"`,
-      amountCents: -amountCents,
-    });
-
-    // Record campaign transaction
-    await this.db.insert(schema.campaignTransactions).values({
-      campaignId: id,
-      type: "escrow_lock",
-      description: "Budget escrowed",
-      amountCents: -amountCents,
-    });
-
-    return { success: true };
-  }
-
-  /**
-   * Creator-triggered close. Refunds the unspent portion of the budget
-   * (total - spent) back to the creator's wallet and marks the campaign
-   * completed. Only allowed when there are no submissions left that could
-   * still claim the budget (nothing pending / approved / auto_approved).
-   */
-  async completeAndRefund(id: string, creatorId: string) {
-    const [campaign] = await this.db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, id))
-      .limit(1);
-
-    if (!campaign) throw new NotFoundException("Campaign not found");
-    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
-    if (campaign.status !== "active" && campaign.status !== "paused") {
-      throw new BadRequestException(
-        "Only active or paused campaigns can be completed",
-      );
-    }
-
-    const [openRow] = await this.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.submissions)
-      .where(
-        and(
-          eq(schema.submissions.campaignId, id),
-          inArray(schema.submissions.status, [
-            "pending",
-            "approved",
-            "auto_approved",
-          ]),
-        ),
-      );
-    if ((openRow?.count ?? 0) > 0) {
-      throw new BadRequestException(
-        "Cannot complete — there are still active submissions. Wait for all clippers to be paid out first.",
-      );
-    }
-
-    const refundCents = Math.max(
-      0,
-      campaign.totalBudgetCents - campaign.budgetSpentCents,
-    );
-    const now = new Date();
-
-    if (refundCents > 0) {
-      await this.db
-        .update(schema.users)
-        .set({
-          walletBalanceCents: sql`${schema.users.walletBalanceCents} + ${refundCents}`,
-        })
-        .where(eq(schema.users.id, creatorId));
-
-      await this.db.insert(schema.walletTransactions).values({
-        userId: creatorId,
-        campaignId: id,
-        type: "refund",
-        description: `Unused budget refunded from "${campaign.title}"`,
-        amountCents: refundCents,
-      });
-
-      await this.db.insert(schema.campaignTransactions).values({
-        campaignId: id,
-        type: "refund",
-        description: "Unused budget refunded to creator",
-        amountCents: refundCents,
-      });
-    }
-
-    await this.db
-      .update(schema.campaigns)
-      .set({ status: "completed", updatedAt: now })
-      .where(eq(schema.campaigns.id, id));
-
-    return { refundedCents: refundCents };
   }
 
   async togglePause(id: string, creatorId: string) {
@@ -887,32 +739,6 @@ export class CampaignsService {
         .set({ status: "completed", updatedAt: new Date() })
         .where(eq(schema.campaigns.id, campaignId));
     }
-  }
-
-  async getTransactions(id: string, creatorId: string) {
-    const [campaign] = await this.db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, id))
-      .limit(1);
-
-    if (!campaign) throw new NotFoundException("Campaign not found");
-    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
-
-    const txns = await this.db
-      .select()
-      .from(schema.campaignTransactions)
-      .where(eq(schema.campaignTransactions.campaignId, id))
-      .orderBy(desc(schema.campaignTransactions.createdAt));
-
-    return txns.map((t) => ({
-      id: t.id,
-      type: t.type,
-      description: t.description,
-      amount: t.amountCents / 100,
-      at: t.createdAt.toISOString(),
-      status: t.status,
-    }));
   }
 
   private serialize(
