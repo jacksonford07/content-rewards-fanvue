@@ -1,5 +1,9 @@
 import { Body, Controller, Patch, Req } from "@nestjs/common";
 import { UsersService } from "./users.service.js";
+import type {
+  ClipperPaymentMethod,
+  ContactMethod,
+} from "../db/schema.js";
 
 @Controller()
 export class UsersController {
@@ -13,6 +17,9 @@ export class UsersController {
       displayName?: string;
       avatarUrl?: string;
       role?: "clipper" | "creator";
+      contactMethod?: ContactMethod | null;
+      contactHandle?: string | null;
+      paymentMethods?: ClipperPaymentMethod[];
     },
   ) {
     return this.usersService.updateMe(req.user.id, body);

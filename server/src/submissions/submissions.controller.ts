@@ -102,6 +102,20 @@ export class SubmissionsController {
     return this.submissionsService.verifyViews(id, req.user.id, body.views);
   }
 
+  @Post(":id/mark-paid")
+  markPaid(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+    @Body()
+    body: {
+      views: number;
+      paymentMethod: string;
+      paymentReference?: string;
+    },
+  ) {
+    return this.submissionsService.markPaid(id, req.user.id, body);
+  }
+
   @Post(":id/dev-fast-forward")
   devFastForward(
     @Param("id") id: string,

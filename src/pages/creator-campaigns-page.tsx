@@ -86,6 +86,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { TopClippersWidget } from "@/components/top-clippers-widget"
 import { PaginationBar } from "@/components/pagination-bar"
 import type { Campaign } from "@/lib/types"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 type StatusKey = "active" | "paused" | "completed" | "draft" | "pending_budget"
 type SortKey = "newest" | "highest_spend" | "highest_budget"
@@ -234,7 +235,7 @@ export function CreatorCampaignsPage() {
           ))}
         </div>
       ) : (
-        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className={`mb-6 grid grid-cols-2 gap-3 ${PAYMENTS_V1_ENABLED ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
           <DashStat
             icon={<Lightning className="size-4" weight="fill" />}
             label="Active campaigns"
@@ -253,12 +254,14 @@ export function CreatorCampaignsPage() {
             value={formatCompactNumber(stats.totalViews)}
             accent="primary"
           />
-          <DashStat
-            icon={<CurrencyDollar className="size-4" weight="fill" />}
-            label="Total spend"
-            value={formatCurrency(stats.totalSpend)}
-            accent="warning"
-          />
+          {PAYMENTS_V1_ENABLED && (
+            <DashStat
+              icon={<CurrencyDollar className="size-4" weight="fill" />}
+              label="Total spend"
+              value={formatCurrency(stats.totalSpend)}
+              accent="warning"
+            />
+          )}
         </div>
       )}
 
@@ -560,7 +563,7 @@ export function CreatorCampaignsPage() {
                               </Link>
                             </DropdownMenuItem>
                           )}
-                          {c.status !== "draft" && c.status !== "pending_budget" && (
+                          {PAYMENTS_V1_ENABLED && c.status !== "draft" && c.status !== "pending_budget" && (
                             <DropdownMenuItem asChild>
                               <Link to={`/creator/campaigns/${c.id}/budget`}>
                                 <Wallet className="size-4" />
@@ -587,12 +590,14 @@ export function CreatorCampaignsPage() {
                                 )}
                                 {c.status === "paused" ? "Resume campaign" : "Pause campaign"}
                               </DropdownMenuItem>
-                              <DropdownMenuItem asChild>
-                                <Link to={`/creator/campaigns/${c.id}/budget`}>
-                                  <X className="size-4" />
-                                  Complete & refund
-                                </Link>
-                              </DropdownMenuItem>
+                              {PAYMENTS_V1_ENABLED && (
+                                <DropdownMenuItem asChild>
+                                  <Link to={`/creator/campaigns/${c.id}/budget`}>
+                                    <X className="size-4" />
+                                    Complete & refund
+                                  </Link>
+                                </DropdownMenuItem>
+                              )}
                             </>
                           )}
                           {(c.status === "draft" || c.status === "pending_budget") && c.budgetSpent === 0 && (

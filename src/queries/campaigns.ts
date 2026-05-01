@@ -302,6 +302,25 @@ export function useFundCampaign(
   })
 }
 
+export function usePublishCampaign(
+  options?: TMutationOptions<{ success: boolean }, string>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.post<{ success: boolean }>(
+        `/campaigns/${id}/publish`,
+      )
+      return res.data
+    },
+    ...options,
+    onSuccess: async (...args) => {
+      await invalidateCampaignFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
 export function usePauseCampaign(
   options?: TMutationOptions<{ status: string }, string>,
 ) {

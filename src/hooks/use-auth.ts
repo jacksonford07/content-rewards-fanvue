@@ -1,4 +1,8 @@
 import { createContext, useContext } from "react"
+import type {
+  ClipperPaymentMethod,
+  ContactMethod,
+} from "@/lib/payment-methods"
 
 export interface AuthUser {
   id: string
@@ -12,6 +16,9 @@ export interface AuthUser {
   role: string
 
   walletBalance: number
+  contactMethod: ContactMethod | null
+  contactHandle: string | null
+  paymentMethods: ClipperPaymentMethod[]
   createdAt: string
 }
 

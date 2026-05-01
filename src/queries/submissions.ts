@@ -240,6 +240,43 @@ export function useVerifyViews(
   })
 }
 
+export function useMarkPaid(
+  options?: TMutationOptions<
+    {
+      views: number
+      payoutAmount: number
+      status: "paid"
+      paymentMethod: string
+    },
+    {
+      id: string
+      views: number
+      paymentMethod: string
+      paymentReference?: string
+    }
+  >,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, views, paymentMethod, paymentReference }) => {
+      const res = await api.post(`/submissions/${id}/mark-paid`, {
+        views,
+        paymentMethod,
+        paymentReference,
+      })
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      qc.invalidateQueries({ queryKey: [QK.campaigns.mineStats] })
+      qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })
+      qc.invalidateQueries({ queryKey: [QK.campaigns.list] })
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
 export function useSubmissionSnapshots(
   id: string,
   options?: TQueryOptions<SubmissionSnapshot[]>,

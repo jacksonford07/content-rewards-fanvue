@@ -19,6 +19,7 @@ import {
   formatCurrency,
 } from "@/lib/mock-data"
 import { useCampaignBreakdown, useDashboard } from "@/queries/analytics"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 export function CreatorAnalyticsPage() {
   const [searchParams] = useSearchParams()
@@ -92,27 +93,31 @@ export function CreatorAnalyticsPage() {
           ))}
         </div>
       ) : (
-        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className={`mb-6 grid grid-cols-2 gap-3 ${PAYMENTS_V1_ENABLED ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
           <KpiCard
             icon={<Eye className="size-4" weight="fill" />}
             label="Total views"
             value={formatCompactNumber(totalViews)}
           />
-          <KpiCard
-            icon={<CurrencyDollar className="size-4" weight="fill" />}
-            label="Total spend"
-            value={formatCurrency(totalSpend)}
-          />
+          {PAYMENTS_V1_ENABLED && (
+            <KpiCard
+              icon={<CurrencyDollar className="size-4" weight="fill" />}
+              label="Total spend"
+              value={formatCurrency(totalSpend)}
+            />
+          )}
           <KpiCard
             icon={<Users className="size-4" weight="fill" />}
             label="Active clippers"
             value={totalClippers.toString()}
           />
-          <KpiCard
-            icon={<ChartLine className="size-4" weight="fill" />}
-            label="Effective CPM"
-            value={formatCurrency(cpm)}
-          />
+          {PAYMENTS_V1_ENABLED && (
+            <KpiCard
+              icon={<ChartLine className="size-4" weight="fill" />}
+              label="Effective CPM"
+              value={formatCurrency(cpm)}
+            />
+          )}
         </div>
       )}
 

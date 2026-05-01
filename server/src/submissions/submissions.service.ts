@@ -669,6 +669,99 @@ export class SubmissionsService {
     return this.settlePayout(submission, campaign, views);
   }
 
+  /**
+   * Off-platform settle. Creator pays the clipper outside Clipt (PayPal,
+   * crypto, bank, etc.), then calls this with the final view count and the
+   * method/reference they used. Locks the day-30 view count, computes the
+   * payout amount from accruals, snapshots the payment metadata, and marks
+   * the submission paid. Does NOT credit any in-app wallet — that's the
+   * whole point.
+   */
+  async markPaid(
+    id: string,
+    creatorId: string,
+    body: {
+      views: number;
+      paymentMethod: string;
+      paymentReference?: string;
+    },
+  ) {
+    const submission = await this.getOwnedSubmission(id, creatorId);
+    if (submission.status !== "approved" && submission.status !== "auto_approved")
+      throw new BadRequestException("Submission is not in approved state");
+    if (body.views == null || body.views < 0)
+      throw new BadRequestException("Views must be a non-negative number");
+    if (!body.paymentMethod || !body.paymentMethod.trim())
+      throw new BadRequestException("paymentMethod is required");
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+
+    // Reuse the accrual machinery so day-30 earnings reflect the locked view
+    // count, then mark paid without touching wallets.
+    if (body.views !== submission.lastViewCount) {
+      await this.applyCampaignAccrual(submission.campaignId, [
+        { submissionId: submission.id, newViewCount: body.views },
+      ]);
+    }
+
+    const [fresh] = await this.db
+      .select({ pending: schema.submissions.pendingEarningsCents })
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submission.id))
+      .limit(1);
+    const payoutCents = fresh?.pending ?? 0;
+    const now = new Date();
+
+    await this.db
+      .update(schema.submissions)
+      .set({
+        status: "paid",
+        viewsAtDay30: body.views,
+        payoutAmountCents: payoutCents,
+        pendingEarningsCents: 0,
+        paymentSentAt: now,
+        paymentMethodUsed: body.paymentMethod.trim(),
+        paymentReference:
+          body.paymentReference?.trim().slice(0, 200) || null,
+        updatedAt: now,
+      })
+      .where(eq(schema.submissions.id, submission.id));
+
+    if (payoutCents > 0) {
+      // Track spend on the campaign so the cap math stays honest.
+      await this.db
+        .update(schema.campaigns)
+        .set({
+          budgetSpentCents: sql`${schema.campaigns.budgetSpentCents} + ${payoutCents}`,
+          updatedAt: now,
+        })
+        .where(eq(schema.campaigns.id, submission.campaignId));
+
+      // Notify clipper that the off-platform payout is on its way.
+      await this.notifications.create({
+        userId: submission.fanId,
+        type: "payout_released",
+        title: `Payout sent: $${(payoutCents / 100).toFixed(2)}`,
+        message: `Your earnings from "${campaign.title}" were sent via ${body.paymentMethod.trim()}.`,
+        actionUrl: "/submissions",
+      });
+    }
+
+    await this.checkCampaignCompletion(submission.campaignId);
+
+    return {
+      views: body.views,
+      payoutAmount: payoutCents / 100,
+      status: "paid" as const,
+      paymentMethod: body.paymentMethod.trim(),
+    };
+  }
+
   async autoFinalizeDueSubmissions() {
     const now = new Date();
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
@@ -919,6 +1012,17 @@ export class SubmissionsService {
         s.creatorDecisionAt !== null &&
         Math.abs(banTime.getTime() - s.creatorDecisionAt.getTime()) < 10_000;
 
+      // Off-platform payout details — only expose to the campaign creator,
+      // and only once they've taken action on the submission (approve/reject/
+      // ban). Keeps clipper contact info private until there's actual reason
+      // to surface it.
+      const isCreatorView = creator?.id === campaign?.creatorId;
+      const exposeContact =
+        isCreatorView &&
+        (s.status === "approved" ||
+          s.status === "auto_approved" ||
+          s.status === "paid");
+
       return {
         id: s.id,
         campaignId: s.campaignId,
@@ -933,11 +1037,15 @@ export class SubmissionsService {
               0,
             )
           : 0,
+        campaignAcceptedPaymentMethods: campaign?.acceptedPaymentMethods ?? [],
         fanId: s.fanId,
         fanName: fan?.displayName ?? "",
         fanHandle: fan?.handle ?? "",
         fanAvatarUrl: fan?.avatarUrl ?? "",
         fanFollowers: 0,
+        fanContactMethod: exposeContact ? fan?.contactMethod ?? null : null,
+        fanContactHandle: exposeContact ? fan?.contactHandle ?? null : null,
+        fanPaymentMethods: exposeContact ? fan?.paymentMethods ?? [] : [],
         postUrl: s.postUrl,
         thumbnailUrl: campaign?.sourceThumbnailUrl ?? "",
         platform: s.platform,
@@ -961,6 +1069,9 @@ export class SubmissionsService {
           : 0,
         aiReviewResult: s.aiReviewResult ?? undefined,
         aiNotes: s.aiNotes ?? undefined,
+        paymentSentAt: s.paymentSentAt?.toISOString(),
+        paymentMethodUsed: s.paymentMethodUsed ?? undefined,
+        paymentReference: s.paymentReference ?? undefined,
       };
     });
   }

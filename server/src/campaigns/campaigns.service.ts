@@ -190,7 +190,7 @@ export class CampaignsService {
               activeClippers:
                 sql<number>`count(distinct ${schema.submissions.fanId})::int`,
               totalViews:
-                sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+                sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
             })
             .from(schema.submissions)
             .where(inArray(schema.submissions.campaignId, campaignIds))
@@ -277,7 +277,7 @@ export class CampaignsService {
         activeClippers:
           sql<number>`count(distinct ${schema.submissions.fanId})::int`,
         totalViews:
-          sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+          sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
         openSubmissions: sql<number>`count(*) filter (where ${schema.submissions.status} in ('pending','approved','auto_approved'))::int`,
       })
       .from(schema.submissions)
@@ -310,7 +310,7 @@ export class CampaignsService {
     const rows = await this.db
       .select({
         campaign: schema.campaigns,
-        totalViews: sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+        totalViews: sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
         totalSubmissions: sql<number>`count(${schema.submissions.id})::int`,
       })
       .from(schema.campaigns)
@@ -321,7 +321,7 @@ export class CampaignsService {
       .where(and(...conditions))
       .groupBy(schema.campaigns.id)
       .orderBy(
-        desc(sql`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)`),
+        desc(sql`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)`),
         desc(schema.campaigns.createdAt),
       )
       .limit(max);
@@ -364,7 +364,7 @@ export class CampaignsService {
       .select({
         user: schema.users,
         earningsCents: sql<number>`coalesce(sum(${schema.submissions.payoutAmountCents}), 0)::int`,
-        totalViews: sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+        totalViews: sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
         submissionCount: sql<number>`count(${schema.submissions.id})::int`,
       })
       .from(schema.submissions)
@@ -379,7 +379,7 @@ export class CampaignsService {
       .groupBy(schema.users.id)
       .orderBy(
         desc(sql`coalesce(sum(${schema.submissions.payoutAmountCents}), 0)`),
-        desc(sql`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)`),
+        desc(sql`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)`),
       )
       .limit(max);
 
@@ -411,6 +411,7 @@ export class CampaignsService {
       maxPayoutPerClip?: number;
       status?: string;
       isPrivate?: boolean;
+      acceptedPaymentMethods?: string[];
     },
   ) {
     const status =
@@ -430,7 +431,9 @@ export class CampaignsService {
         sourceThumbnailUrl: data.sourceThumbnailUrl,
         allowedPlatforms: data.allowedPlatforms ?? [],
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
-        totalBudgetCents: 0,
+        totalBudgetCents: data.totalBudget
+          ? Math.round(data.totalBudget * 100)
+          : 0,
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
         maxPayoutPerClipCents: data.maxPayoutPerClip
           ? Math.round(data.maxPayoutPerClip * 100)
@@ -438,6 +441,8 @@ export class CampaignsService {
         status,
         isPrivate,
         privateSlug: isPrivate ? generatePrivateSlug() : null,
+        acceptedPaymentMethods:
+          (data.acceptedPaymentMethods as schema.PaymentMethodType[]) ?? [],
       })
       .returning();
 
@@ -462,6 +467,7 @@ export class CampaignsService {
       maxPayoutPerClip?: number;
       status?: string;
       isPrivate?: boolean;
+      acceptedPaymentMethods?: string[];
     },
   ) {
     const [existing] = await this.db
@@ -524,6 +530,13 @@ export class CampaignsService {
       }
       if (data.status === "pending_budget")
         updateData.status = "pending_budget";
+      if (data.acceptedPaymentMethods !== undefined)
+        updateData.acceptedPaymentMethods = data.acceptedPaymentMethods;
+    }
+    // acceptedPaymentMethods can be edited even on active campaigns — creators
+    // may need to change which methods they can pay in mid-flight.
+    if (!isDraftLike && data.acceptedPaymentMethods !== undefined) {
+      updateData.acceptedPaymentMethods = data.acceptedPaymentMethods;
     }
 
     const [campaign] = await this.db
@@ -607,6 +620,38 @@ export class CampaignsService {
       description: "Budget escrowed",
       amountCents: -amountCents,
     });
+
+    return { success: true };
+  }
+
+  /**
+   * Publish a campaign without funding (v1 launch — payments disabled).
+   * Flips draft / pending_budget → active. Budget cap is whatever the creator
+   * already entered via update(); this method does not move money.
+   */
+  async publish(id: string, creatorId: string) {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, id))
+      .limit(1);
+
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+    if (campaign.status !== "draft" && campaign.status !== "pending_budget") {
+      throw new BadRequestException(
+        "Only draft or pending campaigns can be published",
+      );
+    }
+
+    await this.db
+      .update(schema.campaigns)
+      .set({
+        status: "active",
+        goesLiveAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.campaigns.id, id));
 
     return { success: true };
   }
@@ -786,7 +831,7 @@ export class CampaignsService {
               activeClippers:
                 sql<number>`count(distinct ${schema.submissions.fanId})::int`,
               totalViews:
-                sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+                sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
             })
             .from(schema.submissions)
             .where(inArray(schema.submissions.campaignId, campaignIds))
@@ -829,7 +874,7 @@ export class CampaignsService {
               totalClippers:
                 sql<number>`count(distinct ${schema.submissions.fanId})::int`,
               totalViews:
-                sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+                sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
             })
             .from(schema.submissions)
             .where(inArray(schema.submissions.campaignId, campaignIds))
@@ -967,6 +1012,7 @@ export class CampaignsService {
       status: c.status,
       isPrivate: c.isPrivate,
       privateSlug: c.privateSlug,
+      acceptedPaymentMethods: c.acceptedPaymentMethods ?? [],
       createdAt: c.createdAt.toISOString(),
       goesLiveAt: c.goesLiveAt?.toISOString() ?? "",
       endsAt: c.endsAt?.toISOString(),
@@ -998,6 +1044,7 @@ export class CampaignsService {
       status: c.status,
       isPrivate: c.isPrivate,
       privateSlug: c.privateSlug,
+      acceptedPaymentMethods: c.acceptedPaymentMethods ?? [],
       createdAt: c.createdAt.toISOString(),
       goesLiveAt: c.goesLiveAt?.toISOString() ?? "",
       endsAt: c.endsAt?.toISOString(),

@@ -77,6 +77,7 @@ import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
 import type { Platform } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 export function CampaignDetailPage() {
   const { id } = useParams()
@@ -961,7 +962,9 @@ export function CampaignDetailPage() {
                 Payout example
               </p>
               <p className="mb-3 text-[11px] text-muted-foreground">
-                Based on {formatCurrency(budgetRemaining)} remaining
+                {PAYMENTS_V1_ENABLED
+                  ? `Based on ${formatCurrency(budgetRemaining)} remaining`
+                  : `${formatCurrency(campaign.rewardRatePer1k)} per 1K views`}
                 {campaign.maxPayoutPerClip
                   ? ` · ${formatCurrency(campaign.maxPayoutPerClip)} max per clip`
                   : ""}

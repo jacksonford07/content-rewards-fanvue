@@ -1,3 +1,9 @@
+import type {
+  ClipperPaymentMethod,
+  ContactMethod,
+  PaymentMethodType,
+} from "./payment-methods"
+
 export type Platform = "tiktok" | "instagram" | "youtube"
 
 export type CampaignStatus =
@@ -46,6 +52,7 @@ export interface Campaign {
   status: CampaignStatus
   isPrivate?: boolean
   privateSlug?: string | null
+  acceptedPaymentMethods?: PaymentMethodType[]
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -90,6 +97,13 @@ export interface Submission {
   pendingEarnings?: number
   aiReviewResult?: "clean" | "flagged"
   aiNotes?: string
+  campaignAcceptedPaymentMethods?: PaymentMethodType[]
+  fanContactMethod?: ContactMethod | null
+  fanContactHandle?: string | null
+  fanPaymentMethods?: ClipperPaymentMethod[]
+  paymentSentAt?: string
+  paymentMethodUsed?: string
+  paymentReference?: string
 }
 
 export interface SubmissionSnapshot {

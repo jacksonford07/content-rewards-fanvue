@@ -144,6 +144,14 @@ export class CampaignsController {
     return this.campaignsService.fund(id, req.user.id, body.amount);
   }
 
+  @Post(":id/publish")
+  publish(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.campaignsService.publish(id, req.user.id);
+  }
+
   @Post(":id/pause")
   pause(
     @Param("id") id: string,

@@ -13,6 +13,7 @@ import {
   Sparkle,
   SignOut,
   CaretUpDown,
+  CreditCard,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -46,6 +47,7 @@ import { cn } from "@/lib/utils"
 import api from "@/lib/api"
 import { QK } from "@/lib/query-keys"
 import { useLogout } from "@/queries/auth"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 type UserRole = "clipper" | "creator"
 
@@ -86,19 +88,29 @@ export function AppSidebar() {
   })
   const counts = { submissions: mySubCount, inbox: inboxCount, notifications: notifCount }
 
-  const clipperNav = useMemo(() => [
-    { to: "/", label: "Campaigns hub", icon: House, end: true },
-    { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
-    { to: "/wallet", label: "Wallet & earnings", icon: Wallet },
-  ], [counts.submissions])
+  const clipperNav = useMemo(() => {
+    const items: Array<{ to: string; label: string; icon: typeof House; end?: boolean; badge?: number }> = [
+      { to: "/", label: "Campaigns hub", icon: House, end: true },
+      { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
+    ]
+    if (PAYMENTS_V1_ENABLED) {
+      items.push({ to: "/wallet", label: "Wallet & earnings", icon: Wallet })
+    }
+    return items
+  }, [counts.submissions])
 
-  const creatorNav = useMemo(() => [
-    { to: "/creator/campaigns", label: "My campaigns", icon: MegaphoneSimple },
-    { to: "/", label: "Campaigns hub", icon: House, end: true },
-    { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
-    { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
-    { to: "/wallet", label: "Wallet", icon: Wallet },
-  ], [counts.inbox])
+  const creatorNav = useMemo(() => {
+    const items: Array<{ to: string; label: string; icon: typeof House; end?: boolean; badge?: number }> = [
+      { to: "/creator/campaigns", label: "My campaigns", icon: MegaphoneSimple },
+      { to: "/", label: "Campaigns hub", icon: House, end: true },
+      { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
+      { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
+    ]
+    if (PAYMENTS_V1_ENABLED) {
+      items.push({ to: "/wallet", label: "Wallet", icon: Wallet })
+    }
+    return items
+  }, [counts.inbox])
 
   const bottomNav = useMemo(() => [
     { to: "/notifications", label: "Notifications", icon: Bell, badge: counts.notifications || undefined },
@@ -247,6 +259,11 @@ export function AppSidebar() {
                 </div>
               </div>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/settings/payouts")}>
+              <CreditCard className="size-4" />
+              Payout details
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"

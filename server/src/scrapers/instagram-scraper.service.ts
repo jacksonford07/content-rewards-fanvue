@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ScrapeResult } from "./scrapers.types.js";
+import { extractInstagramShortcode } from "./scrapers.types.js";
 
 @Injectable()
 export class InstagramScraperService {
@@ -11,7 +12,7 @@ export class InstagramScraperService {
   async scrape(url: string): Promise<ScrapeResult> {
     const host = this.config.get<string>(
       "RAPIDAPI_INSTAGRAM_HOST",
-      "instagram-looter2.p.rapidapi.com",
+      "instagram-scraper-stable-api.p.rapidapi.com",
     );
     const key = this.config.get<string>("RAPIDAPI_KEY");
     if (!key) {
@@ -19,7 +20,13 @@ export class InstagramScraperService {
       return { viewCount: null, available: false };
     }
 
-    const endpoint = `https://${host}/post?url=${encodeURIComponent(url)}`;
+    const shortcode = extractInstagramShortcode(url);
+    if (!shortcode) {
+      this.logger.warn(`Instagram URL has no shortcode: ${url}`);
+      return { viewCount: null, available: false };
+    }
+
+    const endpoint = `https://${host}/get_media_data_v2.php?media_code=${encodeURIComponent(shortcode)}`;
 
     try {
       const res = await fetch(endpoint, {
@@ -40,19 +47,17 @@ export class InstagramScraperService {
 
       const body = (await res.json()) as Record<string, unknown>;
 
-      // Looter returns { status: false, errorMessage: "..." } for deleted/missing posts
-      if (body.status === false) {
+      // Stable-API returns is_published=false for deleted/missing posts.
+      if (body.is_published === false) {
         return { viewCount: null, available: false };
       }
 
+      // Prefer play count — it's what the engagement-driven payout formula
+      // values. Fall back to view count when plays aren't exposed.
       const viewCount = pickNumber(body, [
-        "video_view_count",
         "video_play_count",
+        "video_view_count",
       ]);
-
-      const takenRaw = body.taken_at_timestamp;
-      const postedAt =
-        typeof takenRaw === "number" ? new Date(takenRaw * 1000) : undefined;
 
       const owner = body.owner as Record<string, unknown> | undefined;
       const username =
@@ -64,7 +69,6 @@ export class InstagramScraperService {
       return {
         viewCount,
         available: true,
-        postedAt,
         platformUsername: username,
         videoUrl,
       };

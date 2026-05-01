@@ -15,6 +15,31 @@ export interface SourceKeyframe {
   base64: string;
 }
 
+/**
+ * Off-platform payment methods a clipper can accept and a creator can pay in.
+ * v1 launches without in-app payments — these power the manual handoff.
+ */
+export type PaymentMethodType =
+  | "paypal"
+  | "wise"
+  | "usdc_eth"
+  | "usdc_sol"
+  | "btc"
+  | "bank_uk"
+  | "bank_us"
+  | "cashapp"
+  | "venmo";
+
+export interface ClipperPaymentMethod {
+  type: PaymentMethodType;
+  /** Free-form value: paypal email, crypto address, bank ref, @cashtag, etc. */
+  value: string;
+  /** Optional human note (e.g. "USDC only on Polygon", "preferred"). */
+  note?: string;
+}
+
+export type ContactMethod = "telegram" | "whatsapp" | "phone" | "email";
+
 // ─── Users ───────────────────────────────────────────────────────────────────
 
 export const users = pgTable("users", {
@@ -37,6 +62,16 @@ export const users = pgTable("users", {
     .default("not_started")
     .notNull(),
   walletBalanceCents: integer("wallet_balance_cents").default(0).notNull(),
+  // Off-platform payout coordination. Clippers fill these in so creators know
+  // how to reach them and how to send the manual payout.
+  contactMethod: text("contact_method", {
+    enum: ["telegram", "whatsapp", "phone", "email"],
+  }),
+  contactHandle: text("contact_handle"),
+  paymentMethods: jsonb("payment_methods")
+    .$type<ClipperPaymentMethod[]>()
+    .default([])
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -78,6 +113,13 @@ export const campaigns = pgTable("campaigns", {
     .notNull(),
   isPrivate: boolean("is_private").default(false).notNull(),
   privateSlug: text("private_slug").unique(),
+  // Methods this creator is willing to use for off-platform payouts. v1
+  // surfaces this on the campaign brief so clippers can self-select.
+  acceptedPaymentMethods: text("accepted_payment_methods")
+    .array()
+    .$type<PaymentMethodType[]>()
+    .default([])
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -136,6 +178,11 @@ export const submissions = pgTable("submissions", {
   postDeletedAt: timestamp("post_deleted_at", { withTimezone: true }),
   platformUsername: text("platform_username"),
   pendingEarningsCents: integer("pending_earnings_cents").default(0).notNull(),
+  // Set when creator marks the off-platform payment as sent. v1 replaces the
+  // in-app payout flow with a manual ledger entry.
+  paymentSentAt: timestamp("payment_sent_at", { withTimezone: true }),
+  paymentMethodUsed: text("payment_method_used"),
+  paymentReference: text("payment_reference"),
 });
 
 // ─── Submission View Snapshots ───────────────────────────────────────────────

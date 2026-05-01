@@ -68,17 +68,28 @@ import {
   useInboxSubmissions,
   useRejectSubmission,
   useVerifyViews,
+  useMarkPaid,
   type InboxTab,
 } from "@/queries/submissions"
 import { PaginationBar } from "@/components/pagination-bar"
 import type { Submission } from "@/lib/types"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
+import {
+  PAYMENT_METHODS,
+  contactMethodLabel,
+  paymentMethodLabel,
+  type PaymentMethodType,
+} from "@/lib/payment-methods"
 
 type TabKey = InboxTab
 
 const tabConfig: { key: TabKey; label: string }[] = [
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved" },
-  { key: "verify", label: "Ready to verify" },
+  {
+    key: "verify",
+    label: PAYMENTS_V1_ENABLED ? "Ready to verify" : "Ready to pay",
+  },
   { key: "paid", label: "Paid" },
   { key: "rejected", label: "Rejected" },
   { key: "banned", label: "Banned" },
@@ -156,6 +167,7 @@ export function CreatorInboxPage() {
   const banMutation = useBanSubmission()
   const fastForwardMutation = useDevFastForward()
   const verifyMutation = useVerifyViews()
+  const markPaidMutation = useMarkPaid()
 
   const approve = async (s: Submission) => {
     try {
@@ -207,14 +219,32 @@ export function CreatorInboxPage() {
     }
   }
 
-  const verifyViews = async (submission: Submission, views: number) => {
+  const verifyViews = async (
+    submission: Submission,
+    views: number,
+    payment?: { method: string; reference?: string },
+  ) => {
     try {
+      if (!PAYMENTS_V1_ENABLED && payment) {
+        const res = await markPaidMutation.mutateAsync({
+          id: submission.id,
+          views,
+          paymentMethod: payment.method,
+          paymentReference: payment.reference,
+        })
+        toast.success(`Marked paid: $${res.payoutAmount.toFixed(2)}`, {
+          description: `${views.toLocaleString()} views locked for ${submission.fanName}.`,
+        })
+        return
+      }
       const res = await verifyMutation.mutateAsync({ id: submission.id, views })
       toast.success(`Payout released: $${res.payoutAmount.toFixed(2)}`, {
         description: `${views.toLocaleString()} views verified for ${submission.fanName}'s clip.`,
       })
     } catch {
-      toast.error("Failed to verify views")
+      toast.error(
+        PAYMENTS_V1_ENABLED ? "Failed to verify views" : "Failed to mark payment sent",
+      )
     }
   }
 
@@ -282,7 +312,7 @@ export function CreatorInboxPage() {
               onApprove={() => approve(s)}
               onReject={() => setRejectOpen(s)}
               onBan={() => setBanOpen(s)}
-              onVerifyViews={(views) => verifyViews(s, views)}
+              onVerifyViews={(views, payment) => verifyViews(s, views, payment)}
               onFastForward={() => fastForward(s)}
               showVerify={tab === "verify"}
             />
@@ -394,7 +424,10 @@ function InboxRow({
   onApprove: () => void
   onReject: () => void
   onBan: () => void
-  onVerifyViews: (views: number) => Promise<void>
+  onVerifyViews: (
+    views: number,
+    payment?: { method: string; reference?: string },
+  ) => Promise<void>
   onFastForward: () => void
   showVerify: boolean
 }) {
@@ -403,6 +436,8 @@ function InboxRow({
   const [capModalOpen, setCapModalOpen] = useState(false)
   const [isReleasing, setIsReleasing] = useState(false)
   const [trendOpen, setTrendOpen] = useState(false)
+  const [payMethod, setPayMethod] = useState<PaymentMethodType | "">("")
+  const [payReference, setPayReference] = useState("")
 
   const readOnly =
     submission.status === "approved" ||
@@ -439,7 +474,9 @@ function InboxRow({
 
   const handleSubmitViews = () => {
     if (!validViews) return
-    if (payoutExceedsBudget) {
+    // Off-platform: skip the cap modal — the creator picks a method on the
+    // confirm step and the budget guard happens at campaign completion.
+    if (PAYMENTS_V1_ENABLED && payoutExceedsBudget) {
       setCapModalOpen(true)
       return
     }
@@ -448,20 +485,42 @@ function InboxRow({
 
   const handleConfirm = async () => {
     if (!validViews) return
+    if (!PAYMENTS_V1_ENABLED && !payMethod) return
     setIsReleasing(true)
-    await onVerifyViews(parsedViews)
+    await onVerifyViews(
+      parsedViews,
+      !PAYMENTS_V1_ENABLED && payMethod
+        ? {
+            method: paymentMethodLabel(payMethod),
+            reference: payReference.trim() || undefined,
+          }
+        : undefined,
+    )
     setIsReleasing(false)
     setConfirming(false)
     setViewsInput("")
+    setPayMethod("")
+    setPayReference("")
   }
 
   const handleCapConfirm = async () => {
     if (!validViews) return
+    if (!PAYMENTS_V1_ENABLED && !payMethod) return
     setIsReleasing(true)
-    await onVerifyViews(parsedViews)
+    await onVerifyViews(
+      parsedViews,
+      !PAYMENTS_V1_ENABLED && payMethod
+        ? {
+            method: paymentMethodLabel(payMethod),
+            reference: payReference.trim() || undefined,
+          }
+        : undefined,
+    )
     setIsReleasing(false)
     setCapModalOpen(false)
     setViewsInput("")
+    setPayMethod("")
+    setPayReference("")
   }
 
   return (
@@ -525,7 +584,7 @@ function InboxRow({
               {showVerify && (
                 <span className="flex items-center gap-1 text-primary font-medium">
                   <CheckCircle className="size-3" />
-                  Ready to verify
+                  {PAYMENTS_V1_ENABLED ? "Ready to verify" : "Ready to pay"}
                 </span>
               )}
               {submission.postDeletedAt && (
@@ -693,6 +752,62 @@ function InboxRow({
           </>
         )}
 
+        {/* Off-platform payout coordination — clipper contact + payment info,
+            only visible to the campaign owner once they've approved the clip. */}
+        {!PAYMENTS_V1_ENABLED &&
+          (submission.status === "approved" ||
+            submission.status === "auto_approved" ||
+            submission.status === "paid") &&
+          (submission.fanContactHandle || (submission.fanPaymentMethods?.length ?? 0) > 0) && (
+            <>
+              <Separator />
+              <div className="rounded-lg border border-border/60 bg-background/40 p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Clipper payout details</p>
+                  {submission.status === "paid" && submission.paymentMethodUsed && (
+                    <span className="text-xs text-success">
+                      Sent via {submission.paymentMethodUsed}
+                      {submission.paymentSentAt
+                        ? ` · ${timeAgo(submission.paymentSentAt)}`
+                        : ""}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {submission.fanContactHandle && (
+                    <div className="text-sm">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {contactMethodLabel(submission.fanContactMethod) || "Contact"}
+                      </p>
+                      <p className="mt-0.5 break-all font-mono">
+                        {submission.fanContactHandle}
+                      </p>
+                    </div>
+                  )}
+                  {(submission.fanPaymentMethods ?? []).map((m) => (
+                    <div key={m.type} className="text-sm">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {paymentMethodLabel(m.type)}
+                      </p>
+                      <p className="mt-0.5 break-all font-mono">{m.value}</p>
+                      {m.note && (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {m.note}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {(submission.fanPaymentMethods?.length ?? 0) === 0 && (
+                  <p className="mt-3 text-xs text-warning">
+                    {submission.fanName} hasn't added any payment methods yet —
+                    reach out via {contactMethodLabel(submission.fanContactMethod) || "their contact channel"} before paying.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
         {/* Verify views section */}
         {showVerify && !confirming && (
           <>
@@ -740,7 +855,9 @@ function InboxRow({
           <>
             <Separator />
             <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-              <p className="text-sm font-medium">Confirm payout</p>
+              <p className="text-sm font-medium">
+                {PAYMENTS_V1_ENABLED ? "Confirm payout" : "Confirm payment was sent"}
+              </p>
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
                 <span>
                   <span className="text-muted-foreground">Views: </span>
@@ -751,10 +868,52 @@ function InboxRow({
                   <span className="font-medium">${submission.rewardRatePer1k}/1K views</span>
                 </span>
                 <span>
-                  <span className="text-muted-foreground">Payout: </span>
+                  <span className="text-muted-foreground">
+                    {PAYMENTS_V1_ENABLED ? "Payout" : "Amount owed"}:{" "}
+                  </span>
                   <span className="font-semibold text-primary">${previewPayout?.toFixed(2)}</span>
                 </span>
               </div>
+
+              {!PAYMENTS_V1_ENABLED && (
+                <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Payment method used</Label>
+                    <Select
+                      value={payMethod}
+                      onValueChange={(v) => setPayMethod(v as PaymentMethodType)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(submission.campaignAcceptedPaymentMethods?.length
+                          ? PAYMENT_METHODS.filter((m) =>
+                              submission.campaignAcceptedPaymentMethods!.includes(m.type),
+                            )
+                          : PAYMENT_METHODS
+                        ).map((m) => (
+                          <SelectItem key={m.type} value={m.type}>
+                            {m.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">
+                      Transaction reference{" "}
+                      <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      placeholder="Tx hash, PayPal id, …"
+                      value={payReference}
+                      onChange={(e) => setPayReference(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -764,9 +923,16 @@ function InboxRow({
                 >
                   Back
                 </Button>
-                <Button size="sm" loading={isReleasing} onClick={handleConfirm}>
+                <Button
+                  size="sm"
+                  loading={isReleasing}
+                  disabled={!PAYMENTS_V1_ENABLED && !payMethod}
+                  onClick={handleConfirm}
+                >
                   <CheckCircle weight="fill" className="size-4" />
-                  Confirm &amp; release payout
+                  {PAYMENTS_V1_ENABLED
+                    ? "Confirm & release payout"
+                    : "Mark payment sent"}
                 </Button>
               </div>
             </div>

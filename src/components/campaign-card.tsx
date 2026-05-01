@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlatformIcon } from "@/components/platform-icon"
 import type { Campaign } from "@/lib/types"
 import { formatCompactNumber, formatCurrency } from "@/lib/mock-data"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 interface CampaignCardProps {
   campaign: Campaign
@@ -103,11 +104,19 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
           </div>
           <div className="flex w-full items-center justify-between gap-2 text-[11px] text-muted-foreground">
             <span className="min-w-0 truncate">
-              {committedPct}% committed
-              {reserved > 0 && (
-                <span className="text-primary/80">
-                  {" "}· {formatCurrency(reserved)} pending
-                </span>
+              {PAYMENTS_V1_ENABLED ? (
+                <>
+                  {committedPct}% committed
+                  {reserved > 0 && (
+                    <span className="text-primary/80">
+                      {" "}· {formatCurrency(reserved)} pending
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {formatCurrency(available)} of {formatCurrency(campaign.totalBudget)}
+                </>
               )}
             </span>
             <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-medium text-primary">

@@ -21,8 +21,10 @@ import { CreatorInboxPage } from "@/pages/creator-inbox-page"
 import { CreatorAnalyticsPage } from "@/pages/creator-analytics-page"
 import { NotificationsPage } from "@/pages/notifications-page"
 import { CampaignBudgetPage } from "@/pages/campaign-budget-page"
+import { PayoutSettingsPage } from "@/pages/payout-settings-page"
 
 import { RoleSelectPage } from "@/pages/role-select-page"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 
 export default function App() {
   return (
@@ -55,8 +57,11 @@ export default function App() {
               <Route path="campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="c/:slug" element={<CampaignBySlugPage />} />
               <Route path="submissions" element={<MySubmissionsPage />} />
-              <Route path="wallet" element={<WalletPage />} />
+              {PAYMENTS_V1_ENABLED && (
+                <Route path="wallet" element={<WalletPage />} />
+              )}
               <Route path="notifications" element={<NotificationsPage />} />
+              <Route path="settings/payouts" element={<PayoutSettingsPage />} />
               <Route
                 path="creator/campaigns"
                 element={<CreatorCampaignsPage />}
@@ -69,10 +74,12 @@ export default function App() {
                 path="creator/campaigns/:id/edit"
                 element={<CreateCampaignPage />}
               />
-              <Route
-                path="creator/campaigns/:id/budget"
-                element={<CampaignBudgetPage />}
-              />
+              {PAYMENTS_V1_ENABLED && (
+                <Route
+                  path="creator/campaigns/:id/budget"
+                  element={<CampaignBudgetPage />}
+                />
+              )}
 
               <Route path="creator/inbox" element={<CreatorInboxPage />} />
               <Route

@@ -65,10 +65,15 @@ import {
 import { RichTextEditor, getTextLength } from "@/components/rich-text-editor"
 import { PlatformIcon } from "@/components/platform-icon"
 import { formatCurrency, platformLabels } from "@/lib/mock-data"
+import {
+  PAYMENT_METHODS,
+  type PaymentMethodType,
+} from "@/lib/payment-methods"
 import api from "@/lib/api"
 import {
   useCreateCampaign,
   useFundCampaign,
+  usePublishCampaign,
   useUpdateCampaign,
 } from "@/queries/campaigns"
 import { useTopup } from "@/queries/wallet"
@@ -76,6 +81,7 @@ import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
 import type { Campaign, Platform, RequirementsType } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { PAYMENTS_V1_ENABLED } from "@/lib/feature-flags"
 import {
   Tooltip,
   TooltipContent,
@@ -88,8 +94,12 @@ const allSteps = [
   { id: 3, label: "Source", description: "Google Drive video" },
   { id: 4, label: "Platforms", description: "Where clips can post" },
   { id: 5, label: "Rewards", description: "Rate & budget" },
-  { id: 6, label: "Fund", description: "Escrow payment" },
+  ...(PAYMENTS_V1_ENABLED
+    ? [{ id: 6, label: "Fund", description: "Escrow payment" }]
+    : []),
 ]
+
+const lastStepId = allSteps[allSteps.length - 1]!.id
 
 function getFirstIncompleteStep(c: Campaign): number {
   if (!c.title || c.title === "Untitled draft") return 1
@@ -101,7 +111,7 @@ function getFirstIncompleteStep(c: Campaign): number {
   if (!c.sourceContentUrl?.startsWith("http")) return 3
   if (!c.allowedPlatforms?.length) return 4
   if (!c.rewardRatePer1k || c.rewardRatePer1k <= 0) return 5
-  return 6
+  return lastStepId
 }
 
 export function CreateCampaignPage() {
@@ -112,6 +122,7 @@ export function CreateCampaignPage() {
   const createMutation = useCreateCampaign()
   const updateMutation = useUpdateCampaign()
   const fundMutation = useFundCampaign()
+  const publishMutation = usePublishCampaign()
   const topupMutation = useTopup()
   const [, setExisting] = useState<Campaign | undefined>()
   const [loadError, setLoadError] = useState(false)
@@ -142,6 +153,7 @@ export function CreateCampaignPage() {
     minThreshold: "2000",
     maxPerClip: "",
     isPrivate: false,
+    acceptedPaymentMethods: [] as PaymentMethodType[],
   }))
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [shareCopied, setShareCopied] = useState(false)
@@ -169,6 +181,7 @@ export function CreateCampaignPage() {
         minThreshold: c.minPayoutThreshold.toString(),
         maxPerClip: c.maxPayoutPerClip ? c.maxPayoutPerClip.toString() : "",
         isPrivate: c.isPrivate === true,
+        acceptedPaymentMethods: (c.acceptedPaymentMethods ?? []) as PaymentMethodType[],
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -250,8 +263,12 @@ export function CreateCampaignPage() {
     if (step === 5)
       return (
         parseFloat(state.rewardRate) > 0 &&
-        parseFloat(state.totalBudget) >= 100 &&
-        parseFloat(state.minThreshold) >= 0
+        parseFloat(state.totalBudget) > 0 &&
+        (PAYMENTS_V1_ENABLED ? parseFloat(state.totalBudget) >= 100 : true) &&
+        parseFloat(state.minThreshold) >= 0 &&
+        // Off-platform payments — creator must commit to at least one method
+        // so clippers know what they can accept.
+        (PAYMENTS_V1_ENABLED || state.acceptedPaymentMethods.length > 0)
       )
     return true
   }, [step, state])
@@ -294,6 +311,7 @@ export function CreateCampaignPage() {
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
       maxPayoutPerClip: state.maxPerClip ? parseFloat(state.maxPerClip) : undefined,
       isPrivate: state.isPrivate,
+      acceptedPaymentMethods: state.acceptedPaymentMethods,
     }
   }
 
@@ -346,11 +364,15 @@ export function CreateCampaignPage() {
     setSavingAction("publish")
     try {
       const cid = await saveCampaign("pending_budget")
-      await fundMutation.mutateAsync({
-        id: cid,
-        amount: parseFloat(state.totalBudget),
-      })
-      await refresh()
+      if (PAYMENTS_V1_ENABLED) {
+        await fundMutation.mutateAsync({
+          id: cid,
+          amount: parseFloat(state.totalBudget),
+        })
+        await refresh()
+      } else {
+        await publishMutation.mutateAsync(cid)
+      }
       if (state.isPrivate) {
         // Fetch the created campaign to get its slug
         const res = await api.get<Campaign>(`/campaigns/${cid}`)
@@ -361,9 +383,10 @@ export function CreateCampaignPage() {
           return
         }
       }
-      toast.success("Campaign created and funded", {
-        description: `${state.title} is now live in the hub.`,
-      })
+      toast.success(
+        PAYMENTS_V1_ENABLED ? "Campaign created and funded" : "Campaign created",
+        { description: `${state.title} is now live in the hub.` },
+      )
       navigate("/creator/campaigns")
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || ""
@@ -657,7 +680,7 @@ export function CreateCampaignPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Total budget (min $100)</Label>
+                  <Label>{PAYMENTS_V1_ENABLED ? "Total budget (min $100)" : "Budget cap"}</Label>
                   <div className="relative">
                     <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -733,6 +756,86 @@ export function CreateCampaignPage() {
                   )}
                 </AlertDescription>
               </Alert>
+
+              {!PAYMENTS_V1_ENABLED && (
+                <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+                  <p className="text-sm font-medium">
+                    Payment methods you can pay in
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Payouts happen off-platform. Pick every method you're
+                    happy to use — clippers self-select campaigns whose
+                    methods overlap with theirs.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {PAYMENT_METHODS.map((m) => {
+                      const selected = state.acceptedPaymentMethods.includes(m.type)
+                      return (
+                        <button
+                          key={m.type}
+                          type="button"
+                          onClick={() =>
+                            update(
+                              "acceptedPaymentMethods",
+                              selected
+                                ? state.acceptedPaymentMethods.filter((t) => t !== m.type)
+                                : [...state.acceptedPaymentMethods, m.type],
+                            )
+                          }
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                            selected
+                              ? "border-primary/60 bg-primary/10"
+                              : "border-border/60 bg-background/60 hover:border-border",
+                          )}
+                        >
+                          <span className="font-medium">{m.label}</span>
+                          <span className="flex items-center gap-2">
+                            {m.scope !== "global" && (
+                              <span className="text-[10px] uppercase text-muted-foreground">
+                                {m.scope}
+                              </span>
+                            )}
+                            {selected && (
+                              <Check weight="bold" className="size-4 text-primary" />
+                            )}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {state.acceptedPaymentMethods.length === 0 && (
+                    <p className="mt-3 text-[11px] text-warning">
+                      Pick at least one method so clippers know how you'll pay.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!PAYMENTS_V1_ENABLED && (
+                <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <Checkbox
+                      checked={state.isPrivate}
+                      onCheckedChange={(v) => update("isPrivate", Boolean(v))}
+                      className="mt-0.5 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Lock className="size-4 text-primary" weight="fill" />
+                        <span className="text-sm font-medium">
+                          Make this campaign private
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Hide from the public hub. You'll get a shareable link to
+                        invite specific clippers — only people with the link
+                        can view and submit.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
           )}
 
@@ -894,7 +997,8 @@ export function CreateCampaignPage() {
                 Save draft
               </Button>
               {(() => {
-                const insufficientBalance = (user?.walletBalance ?? 0) < budgetNum
+                const insufficientBalance =
+                  PAYMENTS_V1_ENABLED && (user?.walletBalance ?? 0) < budgetNum
                 const btn = (
                   <Button
                     disabled={
@@ -906,7 +1010,7 @@ export function CreateCampaignPage() {
                     onClick={handlePublish}
                   >
                     <Sparkle weight="fill" className="size-4" />
-                    Fund & publish
+                    {PAYMENTS_V1_ENABLED ? "Fund & publish" : "Publish campaign"}
                   </Button>
                 )
                 if (insufficientBalance) {

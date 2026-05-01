@@ -39,7 +39,7 @@ export class AnalyticsService {
     const [stats] = await this.db
       .select({
         totalViews:
-          sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+          sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
         totalClippers:
           sql<number>`count(distinct ${schema.submissions.fanId})::int`,
         totalSubmissions: sql<number>`count(*)::int`,
@@ -112,7 +112,7 @@ export class AnalyticsService {
         activeClippers:
           sql<number>`count(distinct ${schema.submissions.fanId})::int`,
         totalViews:
-          sql<number>`coalesce(sum(${schema.submissions.viewsAtDay30}), 0)::int`,
+          sql<number>`coalesce(sum(case when ${schema.submissions.status} in ('approved','auto_approved','verified','paid') then coalesce(${schema.submissions.viewsAtDay30}, ${schema.submissions.lastViewCount}) else 0 end), 0)::int`,
       })
       .from(schema.submissions)
       .where(inArray(schema.submissions.campaignId, campaignIds))
