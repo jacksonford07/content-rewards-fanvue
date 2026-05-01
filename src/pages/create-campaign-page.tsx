@@ -61,6 +61,11 @@ import {
 import { RichTextEditor, getTextLength } from "@/components/rich-text-editor"
 import { PlatformIcon } from "@/components/platform-icon"
 import { formatCurrency, platformLabels } from "@/lib/mock-data"
+import {
+  PAYOUT_METHODS,
+  payoutMethodLabel,
+  type PayoutMethod,
+} from "@/lib/payout-validators"
 import api from "@/lib/api"
 import {
   useCreateCampaign,
@@ -125,6 +130,7 @@ export function CreateCampaignPage() {
     minThreshold: "2000",
     maxPerClip: "",
     isPrivate: false,
+    acceptedPayoutMethods: [] as PayoutMethod[],
   }))
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [shareCopied, setShareCopied] = useState(false)
@@ -152,6 +158,7 @@ export function CreateCampaignPage() {
         minThreshold: c.minPayoutThreshold.toString(),
         maxPerClip: c.maxPayoutPerClip ? c.maxPayoutPerClip.toString() : "",
         isPrivate: c.isPrivate === true,
+        acceptedPayoutMethods: c.acceptedPayoutMethods ?? [],
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -234,7 +241,8 @@ export function CreateCampaignPage() {
       return (
         parseFloat(state.rewardRate) > 0 &&
         parseFloat(state.totalBudget) >= 100 &&
-        parseFloat(state.minThreshold) >= 0
+        parseFloat(state.minThreshold) >= 0 &&
+        state.acceptedPayoutMethods.length > 0
       )
     return true
   }, [step, state])
@@ -272,6 +280,7 @@ export function CreateCampaignPage() {
       sourceContentUrl: state.sourceUrl,
       sourceThumbnailUrl: thumbUrl,
       allowedPlatforms: state.platforms,
+      acceptedPayoutMethods: state.acceptedPayoutMethods,
       rewardRatePer1k: parseFloat(state.rewardRate) || 0,
       totalBudget: parseFloat(state.totalBudget) || 0,
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
@@ -709,6 +718,52 @@ export function CreateCampaignPage() {
                     </p>
                   </div>
                 </label>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-border/60 bg-background/40 p-4">
+                <div>
+                  <p className="text-sm font-medium">
+                    Accepted payout methods
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Pick every method you're willing to pay clippers in.
+                    Clippers can only submit if at least one of their accepted
+                    methods overlaps with yours.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {PAYOUT_METHODS.map((m) => {
+                    const selected = state.acceptedPayoutMethods.includes(m)
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            acceptedPayoutMethods: selected
+                              ? s.acceptedPayoutMethods.filter((x) => x !== m)
+                              : [...s.acceptedPayoutMethods, m],
+                          }))
+                        }
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors",
+                          selected
+                            ? "border-primary/60 bg-primary/10 text-primary"
+                            : "border-border/70 bg-background/50 hover:border-border",
+                        )}
+                      >
+                        {selected && <Check weight="bold" className="size-3" />}
+                        {payoutMethodLabel(m)}
+                      </button>
+                    )
+                  })}
+                </div>
+                {state.acceptedPayoutMethods.length === 0 && (
+                  <p className="text-xs text-warning">
+                    Pick at least one — required to publish.
+                  </p>
+                )}
               </div>
 
               <Alert className="border-border/60 bg-background/40">

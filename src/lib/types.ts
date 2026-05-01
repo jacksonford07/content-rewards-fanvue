@@ -1,3 +1,5 @@
+import type { PayoutMethod } from "@/lib/payout-validators"
+
 export type Platform = "tiktok" | "instagram" | "youtube"
 
 export type CampaignStatus =
@@ -49,6 +51,7 @@ export interface Campaign {
   status: CampaignStatus
   isPrivate?: boolean
   privateSlug?: string | null
+  acceptedPayoutMethods: PayoutMethod[]
   createdAt: string
   goesLiveAt: string
   endsAt?: string

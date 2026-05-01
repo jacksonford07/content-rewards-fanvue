@@ -117,6 +117,7 @@ export class CampaignsController {
       maxPayoutPerClip?: number;
       status?: string;
       isPrivate?: boolean;
+      acceptedPayoutMethods?: string[];
     },
   ) {
     return this.campaignsService.create(req.user.id, body);
