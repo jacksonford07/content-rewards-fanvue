@@ -15,6 +15,13 @@
       "when": 1777000000000,
       "tag": "0001_m1_3_drop_wallet_kyc",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777100000000,
+      "tag": "0002_m2_off_platform_payouts",
+      "breakpoints": true
     }
   ]
 }
