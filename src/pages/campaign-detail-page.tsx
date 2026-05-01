@@ -48,13 +48,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Alert,
@@ -372,6 +365,13 @@ export function CampaignDetailPage() {
     }
   }
 
+  // B1: route the breadcrumb / Back link based on whether the viewer owns
+  // the campaign. Creators land here from "My campaigns" and expect to
+  // bounce back there; clippers land from the hub.
+  const viewerOwnsCampaign = user?.id === campaign.creator?.id
+  const backHref = viewerOwnsCampaign ? "/creator/campaigns" : "/"
+  const backLabel = viewerOwnsCampaign ? "My campaigns" : "Hub"
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
       <div className="mb-6 flex items-center justify-between">
@@ -379,7 +379,7 @@ export function CampaignDetailPage() {
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
-                <Link to="/">Hub</Link>
+                <Link to={backHref}>{backLabel}</Link>
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -391,7 +391,7 @@ export function CampaignDetailPage() {
           </BreadcrumbList>
         </Breadcrumb>
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/">
+          <Link to={backHref}>
             <ArrowLeft className="size-4" />
             Back
           </Link>
@@ -1026,27 +1026,6 @@ export function CampaignDetailPage() {
                   Detected {platformLabels[detectedPlatform]}
                 </p>
               ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label>Platform</Label>
-              <Select
-                value={platform}
-                onValueChange={(v) => setPlatform(v as Platform)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose platform" />
-                </SelectTrigger>
-                <SelectContent>
-                  {campaign.allowedPlatforms.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      <div className="flex items-center gap-2">
-                        <PlatformIcon platform={p} />
-                        {platformLabels[p]}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <Separator />

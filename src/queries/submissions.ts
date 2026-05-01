@@ -14,6 +14,7 @@ export type InboxTab =
   | "approved"
   | "verify"
   | "paid"
+  | "disputed"
   | "rejected"
   | "banned"
 
@@ -22,6 +23,7 @@ export interface InboxStats {
   approved: number
   verify: number
   paid: number
+  disputed: number
   rejected: number
   banned: number
 }
@@ -229,8 +231,6 @@ export function useVerifyViews(
     ...options,
     onSuccess: (...args) => {
       invalidateSubmissionFamily(qc)
-      qc.invalidateQueries({ queryKey: [QK.wallet.balance] })
-      qc.invalidateQueries({ queryKey: [QK.wallet.transactions] })
       qc.invalidateQueries({ queryKey: [QK.auth.me] })
       qc.invalidateQueries({ queryKey: [QK.campaigns.mineStats] })
       qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })

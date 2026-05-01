@@ -13,6 +13,9 @@ export type SubmissionStatus =
   | "rejected"
   | "auto_approved"
   | "paid"
+  | "ready_to_pay"
+  | "paid_off_platform"
+  | "disputed"
 
 export type RequirementsType = "native" | "google_doc"
 
@@ -98,13 +101,3 @@ export interface SubmissionSnapshot {
   available: boolean
 }
 
-export type KycStatus = "not_started" | "in_progress" | "verified" | "rejected"
-
-export interface BudgetTransaction {
-  id: string
-  type: "escrow_lock" | "payout_release" | "topup" | "refund"
-  description: string
-  amount: number
-  at: string
-  status: "completed" | "pending"
-}

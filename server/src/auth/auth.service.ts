@@ -48,10 +48,8 @@ export class AuthService {
         handle: role === "creator" ? "dev_creator" : "dev_clipper",
         displayName: role === "creator" ? "Dev Creator" : "Dev Clipper",
         role,
-        isCreator: role === "creator",
         fanvueId: `dev-${role}`,
         fanvueHandle: role === "creator" ? "dev_creator" : "dev_clipper",
-        walletBalanceCents: role === "creator" ? 500_00 : 100_00,
       })
       .returning();
 
@@ -60,9 +58,6 @@ export class AuthService {
 
   private sanitize(user: typeof schema.users.$inferSelect) {
     const { passwordHash: _, ...rest } = user;
-    return {
-      ...rest,
-      walletBalance: rest.walletBalanceCents / 100,
-    };
+    return rest;
   }
 }

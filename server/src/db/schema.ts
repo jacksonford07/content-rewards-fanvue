@@ -27,16 +27,9 @@ export const users = pgTable("users", {
   fanvueId: text("fanvue_id").unique(),
   fanvueHandle: text("fanvue_handle"),
   fanvueAvatarUrl: text("fanvue_avatar_url"),
-  isCreator: boolean("is_creator").default(false).notNull(),
   role: text("role", { enum: ["clipper", "creator", "both"] })
     .default("clipper")
     .notNull(),
-  kycStatus: text("kyc_status", {
-    enum: ["not_started", "in_progress", "verified", "rejected"],
-  })
-    .default("not_started")
-    .notNull(),
-  walletBalanceCents: integer("wallet_balance_cents").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -111,7 +104,17 @@ export const submissions = pgTable("submissions", {
   }),
   aiNotes: text("ai_notes"),
   status: text("status", {
-    enum: ["pending", "approved", "rejected", "auto_approved", "paid", "flagged"],
+    enum: [
+      "pending",
+      "approved",
+      "rejected",
+      "auto_approved",
+      "paid",
+      "flagged",
+      "ready_to_pay",
+      "paid_off_platform",
+      "disputed",
+    ],
   })
     .default("pending")
     .notNull(),
@@ -178,47 +181,6 @@ export const notifications = pgTable("notifications", {
     .notNull(),
 });
 
-// ─── Wallet Transactions ─────────────────────────────────────────────────────
-
-export const walletTransactions = pgTable("wallet_transactions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  campaignId: uuid("campaign_id").references(() => campaigns.id),
-  type: text("type", {
-    enum: ["payout", "withdrawal", "topup", "escrow_lock", "refund"],
-  }).notNull(),
-  description: text("description").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  status: text("status", { enum: ["completed", "pending"] })
-    .default("completed")
-    .notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
-// ─── Campaign Transactions ───────────────────────────────────────────────────
-
-export const campaignTransactions = pgTable("campaign_transactions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  campaignId: uuid("campaign_id")
-    .notNull()
-    .references(() => campaigns.id),
-  type: text("type", {
-    enum: ["escrow_lock", "payout_release", "topup", "refund"],
-  }).notNull(),
-  description: text("description").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  status: text("status", { enum: ["completed", "pending"] })
-    .default("completed")
-    .notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
 // ─── Campaign Bans ───────────────────────────────────────────────────────────
 
 export const campaignBans = pgTable(
@@ -243,7 +205,6 @@ export const usersRelations = relations(users, ({ many }) => ({
   campaigns: many(campaigns),
   submissions: many(submissions),
   notifications: many(notifications),
-  walletTransactions: many(walletTransactions),
 }));
 
 export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
@@ -252,7 +213,6 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
     references: [users.id],
   }),
   submissions: many(submissions),
-  transactions: many(campaignTransactions),
 }));
 
 export const submissionsRelations = relations(submissions, ({ one, many }) => ({
@@ -284,22 +244,3 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   }),
 }));
 
-export const walletTransactionsRelations = relations(
-  walletTransactions,
-  ({ one }) => ({
-    user: one(users, {
-      fields: [walletTransactions.userId],
-      references: [users.id],
-    }),
-  }),
-);
-
-export const campaignTransactionsRelations = relations(
-  campaignTransactions,
-  ({ one }) => ({
-    campaign: one(campaigns, {
-      fields: [campaignTransactions.campaignId],
-      references: [campaigns.id],
-    }),
-  }),
-);

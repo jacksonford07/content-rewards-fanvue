@@ -172,9 +172,8 @@ export class FanvueOAuthService {
     avatarUrl?: string;
     isCreator: boolean;
   }) {
-    if (!profile.isCreator) {
-      throw new NotACreatorError();
-    }
+    // v1.1: KYC and the creator-only gate are gone — anyone signed into
+    // Fanvue can use the app, with role decided in the role-select screen.
     // Try to find by fanvueId
     const [existing] = await this.db
       .select()

@@ -43,7 +43,7 @@ export class UsersService {
       .returning();
     if (!user) throw new Error("User not found");
     const { passwordHash: _, ...rest } = user;
-    return { ...rest, walletBalance: rest.walletBalanceCents / 100 };
+    return rest;
   }
 
 }

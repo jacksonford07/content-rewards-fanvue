@@ -36,11 +36,6 @@ async function cleanSeed() {
   // Delete in FK order
   if (seedCampaignIds.length > 0) {
     await db
-      .delete(schema.campaignTransactions)
-      .where(inArray(schema.campaignTransactions.campaignId, seedCampaignIds));
-    console.log("Deleted seed campaign transactions");
-
-    await db
       .delete(schema.campaignBans)
       .where(inArray(schema.campaignBans.campaignId, seedCampaignIds));
     console.log("Deleted seed campaign bans");
@@ -99,12 +94,6 @@ async function cleanSeed() {
     .delete(schema.notifications)
     .where(inArray(schema.notifications.userId, seedUserIds));
   console.log("Deleted seed notifications");
-
-  // Delete wallet transactions for seed users
-  await db
-    .delete(schema.walletTransactions)
-    .where(inArray(schema.walletTransactions.userId, seedUserIds));
-  console.log("Deleted seed wallet transactions");
 
   // Delete seed campaigns
   if (seedCampaignIds.length > 0) {

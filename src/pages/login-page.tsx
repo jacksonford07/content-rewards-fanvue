@@ -7,7 +7,6 @@ import {
   Users,
   ShieldCheck,
   ArrowSquareOut,
-  CheckCircle,
   Confetti,
 } from "@phosphor-icons/react"
 import { useLocation, useSearchParams } from "react-router-dom"
@@ -78,7 +77,7 @@ export function LoginPage() {
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               Fund campaigns, upload source videos, and let creators worldwide
               spread your content as short-form clips on TikTok, Instagram
-              Reels, and YouTube Shorts.
+              Reels, and YouTube.
             </p>
           </div>
 
@@ -101,7 +100,7 @@ export function LoginPage() {
             <FeatureRow
               icon={<Lightning className="size-5" weight="fill" />}
               title="Multi-platform reach"
-              description="Clips posted to TikTok, Instagram Reels, and YouTube Shorts."
+              description="Clips posted to TikTok, Instagram Reels, and YouTube."
             />
           </div>
         </div>
@@ -251,6 +250,10 @@ function LogoMark({ size }: { size: "sm" | "lg" }) {
 }
 
 function CreatorOnboardingView({ onRetry }: { onRetry: () => void }) {
+  // v1.1: KYC and the creator-only gate are gone, so this view is a fallback
+  // that should not normally render. Backend will stop returning
+  // `not_creator` once M1.2 lands; this stays as a generic retry surface in
+  // case anything still bounces a sign-in.
   return (
     <div>
       <div className="mb-6 text-center">
@@ -258,100 +261,22 @@ function CreatorOnboardingView({ onRetry }: { onRetry: () => void }) {
           <Confetti weight="fill" className="size-7 text-primary" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight">
-          One quick step to get started
+          We couldn't sign you in
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-          Content Rewards is built for Fanvue creators. Upgrade your
-          account on Fanvue and you're in.
+          Something went wrong with the Fanvue sign-in flow. Try again — if
+          it keeps failing, refresh the page or sign back into Fanvue.
         </p>
       </div>
 
-      <div className="mb-6 space-y-3 rounded-lg border border-border/60 bg-background/40 p-4">
-        <OnboardingStep
-          done
-          title="Signed in with Fanvue"
-          description="We recognised your Fanvue account."
-        />
-        <OnboardingStep
-          active
-          title="Become a creator on Fanvue"
-          description="Takes a couple of minutes. You'll stay on Fanvue for this step."
-        />
-        <OnboardingStep
-          title="Come back and finish sign-in"
-          description="Once you're a creator, return here and click Sign in again."
-        />
-      </div>
-
-      <Button className="w-full" size="lg" asChild>
-        <a
-          href="https://www.fanvue.com/myprofile/creator-onboarding"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <ArrowSquareOut className="mr-2 size-4" />
-          Become a Fanvue creator
-        </a>
+      <Button className="w-full" size="lg" onClick={onRetry}>
+        <ArrowSquareOut className="mr-2 size-4" />
+        Try signing in again
       </Button>
-
-      <button
-        type="button"
-        onClick={onRetry}
-        className="mt-3 w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-      >
-        Already upgraded? Try signing in again
-      </button>
 
       <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/60">
         Content Rewards is a third-party app on the Fanvue platform.
       </p>
-    </div>
-  )
-}
-
-function OnboardingStep({
-  done,
-  active,
-  title,
-  description,
-}: {
-  done?: boolean
-  active?: boolean
-  title: string
-  description: string
-}) {
-  return (
-    <div className="flex gap-3">
-      <div
-        className={cn(
-          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
-          done && "bg-primary/15 text-primary",
-          active && "bg-primary text-primary-foreground",
-          !done && !active && "border border-border/60 text-muted-foreground",
-        )}
-      >
-        {done ? (
-          <CheckCircle weight="fill" className="size-5" />
-        ) : active ? (
-          <span className="text-[11px] font-semibold">2</span>
-        ) : (
-          <span className="text-[11px] font-semibold">3</span>
-        )}
-      </div>
-      <div className="min-w-0">
-        <p
-          className={cn(
-            "text-sm font-medium leading-tight",
-            done && "text-muted-foreground line-through decoration-muted-foreground/40",
-            !done && "text-foreground",
-          )}
-        >
-          {title}
-        </p>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-          {description}
-        </p>
-      </div>
     </div>
   )
 }
