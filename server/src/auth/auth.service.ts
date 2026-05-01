@@ -48,7 +48,6 @@ export class AuthService {
         handle: role === "creator" ? "dev_creator" : "dev_clipper",
         displayName: role === "creator" ? "Dev Creator" : "Dev Clipper",
         role,
-        isCreator: role === "creator",
         fanvueId: `dev-${role}`,
         fanvueHandle: role === "creator" ? "dev_creator" : "dev_clipper",
       })
