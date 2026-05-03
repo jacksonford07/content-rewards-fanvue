@@ -53,10 +53,7 @@ export function LoginPage() {
 
   const handleSignIn = () => {
     const apiUrl = import.meta.env.VITE_API_URL || ""
-    // Tell the backend where to bounce us back to after OAuth — supports
-    // multiple frontends (prod + preview) sharing one backend deploy.
-    const ret = encodeURIComponent(window.location.origin)
-    window.location.href = `${apiUrl}/api/auth/fanvue?return=${ret}`
+    window.location.href = `${apiUrl}/api/auth/fanvue`
   }
 
   return (

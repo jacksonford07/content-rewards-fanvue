@@ -12,10 +12,6 @@ const FANVUE_API_URL = "https://api.fanvue.com";
 interface PkceEntry {
   verifier: string;
   redirectUri: string;
-  // Where to send the user after callback success. Captured from the
-  // originating request so a single backend can serve both prod and
-  // preview frontends without a hardcoded FRONTEND_URL env var.
-  frontendOrigin: string | null;
   createdAt: number;
 }
 
@@ -49,17 +45,8 @@ export class FanvueOAuthService {
 
   /**
    * Build the Fanvue authorization URL with PKCE and store verifier.
-   *
-   * `extraScopes` are appended to the default scope set when the caller
-   * needs additional permissions (e.g. tracking_links — M4).
-   * `frontendOrigin` is persisted so the OAuth callback can redirect the
-   * user back to whichever frontend started the flow (prod vs preview).
    */
-  generateAuthUrl(
-    redirectUri: string,
-    extraScopes: string[] = [],
-    frontendOrigin: string | null = null,
-  ): string {
+  generateAuthUrl(redirectUri: string): string {
     const clientId = this.config.getOrThrow("FANVUE_CLIENT_ID");
 
     const verifier = this.base64URLEncode(randomBytes(32));
@@ -71,18 +58,14 @@ export class FanvueOAuthService {
     this.pkceVerifiers.set(state, {
       verifier,
       redirectUri,
-      frontendOrigin,
       createdAt: Date.now(),
     });
-
-    const baseScopes = ["read:self", "read:creator"];
-    const allScopes = [...new Set([...baseScopes, ...extraScopes])];
 
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: allScopes.join(" "),
+      scope: "read:self read:creator",
       state,
       code_challenge: challenge,
       code_challenge_method: "S256",
@@ -94,8 +77,6 @@ export class FanvueOAuthService {
 
   /**
    * Handle OAuth callback: validate state, exchange code, fetch profile, find/create user.
-   * Returns the resolved user along with the frontend origin captured at
-   * OAuth start time, so the controller can redirect there.
    */
   async handleCallback(code: string, state: string) {
     const stored = this.pkceVerifiers.get(state);
@@ -111,8 +92,7 @@ export class FanvueOAuthService {
 
     const tokenData = await this.exchangeCodeForToken(code, stored);
     const profile = await this.fetchUserProfile(tokenData.access_token);
-    const user = await this.findOrCreateUser(profile);
-    return { user, frontendOrigin: stored.frontendOrigin };
+    return this.findOrCreateUser(profile);
   }
 
   /**

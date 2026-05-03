@@ -15,68 +15,14 @@ export class AuthController {
     private config: ConfigService,
   ) {}
 
-  /**
-   * Resolve the frontend origin that should receive the post-OAuth
-   * redirect. We accept either an explicit `?return=` query param or the
-   * Referer header, and validate against an allowlist so the callback
-   * can't be redirected to an arbitrary host (open-redirect prevention).
-   *
-   * Allowlist source: FRONTEND_URL_ALLOWLIST env var (comma-separated).
-   * If that's unset, fall back to a single-origin allowlist of FRONTEND_URL.
-   *
-   * Returns a fully-qualified origin (scheme + host[:port], no trailing
-   * slash). Falls back to the FRONTEND_URL env var when nothing matches.
-   */
-  private resolveFrontendOrigin(req: Request, returnParam?: string): string {
-    const fallback = this.config.get<string>(
-      "FRONTEND_URL",
-      "http://localhost:5173",
-    );
-    const allowlistRaw =
-      this.config.get<string>("FRONTEND_URL_ALLOWLIST") ?? fallback;
-    const allowlist = allowlistRaw
-      .split(",")
-      .map((s) => s.trim().replace(/\/$/, ""))
-      .filter(Boolean);
-
-    const candidates = [returnParam, req.get("origin"), req.get("referer")]
-      .filter((v): v is string => Boolean(v))
-      .map((v) => {
-        try {
-          const url = new URL(v);
-          return `${url.protocol}//${url.host}`;
-        } catch {
-          return null;
-        }
-      })
-      .filter((v): v is string => Boolean(v));
-
-    for (const candidate of candidates) {
-      if (allowlist.includes(candidate)) {
-        return candidate;
-      }
-    }
-
-    return fallback.replace(/\/$/, "");
-  }
-
   @Public()
   @Get("fanvue")
-  fanvueRedirect(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query("return") returnParam?: string,
-  ) {
+  fanvueRedirect(@Req() req: Request, @Res() res: Response) {
     // Fanvue OAuth app is registered with /auth/fanvue/callback (no /api prefix)
     const redirectUri = `${req.protocol}://${req.get("host")}/auth/fanvue/callback`;
-    // Resolve where to bounce the user *after* OAuth completes. Captured
-    // from ?return=, Origin, or Referer (allowlist-checked) so a single
-    // backend can serve both prod and preview frontends.
-    const frontendOrigin = this.resolveFrontendOrigin(req, returnParam);
-    this.logger.log(
-      `[fanvue] Start OAuth → redirect_uri="${redirectUri}" frontend="${frontendOrigin}"`,
-    );
-    const url = this.fanvueOAuth.generateAuthUrl(redirectUri, [], frontendOrigin);
+    this.logger.log(`[fanvue] Start OAuth → redirect_uri="${redirectUri}"`);
+    const url = this.fanvueOAuth.generateAuthUrl(redirectUri);
+    this.logger.log(`[fanvue] Redirecting to Fanvue auth URL`);
     res.redirect(url);
   }
 
@@ -89,9 +35,7 @@ export class AuthController {
     @Query("error_description") errorDescription: string,
     @Res() res: Response,
   ) {
-    // Default fallback for the early-error case where we don't have a
-    // PKCE entry yet to recover the frontend origin from.
-    const fallbackFrontend = this.config.get<string>(
+    const frontendUrl = this.config.get<string>(
       "FRONTEND_URL",
       "http://localhost:5173",
     );
@@ -109,34 +53,28 @@ export class AuthController {
         reason: error ?? "no_code",
         ...(errorDescription ? { desc: errorDescription } : {}),
       });
-      res.redirect(`${fallbackFrontend}/login?${params.toString()}`);
+      res.redirect(`${frontendUrl}/login?${params.toString()}`);
       return;
     }
 
     try {
-      const { user, frontendOrigin } = await this.fanvueOAuth.handleCallback(
-        code,
-        state,
-      );
+      const user = await this.fanvueOAuth.handleCallback(code, state);
       const jwt = this.authService.signToken(user.id);
-      const target = frontendOrigin ?? fallbackFrontend;
-      this.logger.log(
-        `[fanvue/callback] Login OK for user=${user.id} → ${target}`,
-      );
+      this.logger.log(`[fanvue/callback] Login OK for user=${user.id}`);
 
       const params = new URLSearchParams({ accessToken: jwt });
-      res.redirect(`${target}/auth/fanvue/complete?${params.toString()}`);
+      res.redirect(`${frontendUrl}/auth/fanvue/complete?${params.toString()}`);
     } catch (err) {
       if (err instanceof NotACreatorError) {
         this.logger.warn(`[fanvue/callback] Not a creator — redirecting to /login?error=not_creator`);
-        res.redirect(`${fallbackFrontend}/login?error=not_creator`);
+        res.redirect(`${frontendUrl}/login?error=not_creator`);
         return;
       }
       this.logger.error(
         `[fanvue/callback] Unexpected error during handleCallback: ${err instanceof Error ? err.message : String(err)}`,
         err instanceof Error ? err.stack : undefined,
       );
-      res.redirect(`${fallbackFrontend}/login?error=auth_failed`);
+      res.redirect(`${frontendUrl}/login?error=auth_failed`);
     }
   }
 
@@ -146,7 +84,6 @@ export class AuthController {
   @Public()
   @Get("dev-login")
   async devLogin(
-    @Req() req: Request,
     @Query("role") role: string,
     @Res() res: Response,
   ) {
@@ -162,7 +99,7 @@ export class AuthController {
     const user = await this.authService.findOrCreateDevUser(role as "clipper" | "creator");
     const jwt = this.authService.signToken(user.id);
 
-    const frontendUrl = this.resolveFrontendOrigin(req);
+    const frontendUrl = this.config.get<string>("FRONTEND_URL", "http://localhost:5173");
     const params = new URLSearchParams({ accessToken: jwt });
     res.redirect(`${frontendUrl}/auth/fanvue/complete?${params.toString()}`);
   }
