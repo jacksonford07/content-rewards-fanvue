@@ -3,6 +3,7 @@ import { JwtService } from "@nestjs/jwt";
 import { eq } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
+import { isAdminEmail } from "../admin/admin-emails.js";
 
 @Injectable()
 export class AuthService {
@@ -82,6 +83,8 @@ export class AuthService {
 
   private sanitize(user: typeof schema.users.$inferSelect) {
     const { passwordHash: _, ...rest } = user;
-    return rest;
+    // Surface isAdmin so the SPA can render the Admin sidebar section
+    // without making a separate gating request.
+    return { ...rest, isAdmin: isAdminEmail(rest.email) };
   }
 }

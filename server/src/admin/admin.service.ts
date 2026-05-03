@@ -9,17 +9,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 
-function adminEmails(): string[] {
-  // Default allowlist: prod admins + the dev-admin Dev Login fixture.
-  // Override via ADMIN_EMAILS env var (comma-separated).
-  const raw =
-    process.env.ADMIN_EMAILS ??
-    "jackson.ford@fanvue.com,iniaki.boudiaf@fanvue.com,dev-admin@test.local";
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
+import { getAdminEmails } from "./admin-emails.js";
 
 @Injectable()
 export class AdminService {
@@ -32,7 +22,7 @@ export class AdminService {
       .where(eq(schema.users.id, userId))
       .limit(1);
     if (!user) throw new ForbiddenException();
-    const allowed = adminEmails();
+    const allowed = getAdminEmails();
     if (!allowed.includes(user.email.toLowerCase())) {
       throw new ForbiddenException("Admin only");
     }
