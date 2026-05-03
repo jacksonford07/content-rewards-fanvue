@@ -3,6 +3,7 @@ import { ArrowRight, Users, Eye, CurrencyDollar } from "@phosphor-icons/react"
 
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { TrustBadge } from "@/components/trust-badge"
 import { PlatformIcon } from "@/components/platform-icon"
 import type { Campaign } from "@/lib/types"
 import { formatCompactNumber, formatCurrency } from "@/lib/mock-data"
@@ -66,6 +67,12 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
             <span className="truncate text-xs text-muted-foreground">
               @{campaign.creator.handle}
             </span>
+            <TrustBadge
+              trust={campaign.creator.trust}
+              side="creator"
+              variant="hub-card"
+              className="ml-auto"
+            />
           </div>
           <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
             {campaign.title}

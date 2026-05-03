@@ -67,6 +67,7 @@ import { useCampaign, useCampaignSourceStatus } from "@/queries/campaigns"
 import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
 import { usePayoutSettings } from "@/queries/payout-methods"
 import { payoutMethodLabel } from "@/lib/payout-validators"
+import { TrustBadge } from "@/components/trust-badge"
 import { QK } from "@/lib/query-keys"
 import { NotFoundCard } from "@/components/not-found-card"
 import { useAuth } from "@/hooks/use-auth"
@@ -565,31 +566,38 @@ export function CampaignDetailPage() {
 
           {/* Creator card */}
           <Card className="border-border/60 bg-card/70 backdrop-blur">
-            <CardContent className="flex items-center gap-4 p-4">
-              <Avatar className="size-10 ring-2 ring-primary/20">
-                <AvatarImage src={campaign.creator.avatarUrl} />
-                <AvatarFallback>
-                  {campaign.creator.name.charAt(0)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-sm font-semibold">
-                    {campaign.creator.name}
+            <CardContent className="space-y-3 p-4">
+              <div className="flex items-center gap-4">
+                <Avatar className="size-10 ring-2 ring-primary/20">
+                  <AvatarImage src={campaign.creator.avatarUrl} />
+                  <AvatarFallback>
+                    {campaign.creator.name.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-sm font-semibold">
+                      {campaign.creator.name}
+                    </p>
+                    {campaign.creator.verified && (
+                      <SealCheck
+                        weight="fill"
+                        className="size-4 text-primary"
+                      />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    @{campaign.creator.handle} ·{" "}
+                    {formatCompactNumber(campaign.creator.followers ?? 0)}{" "}
+                    followers
                   </p>
-                  {campaign.creator.verified && (
-                    <SealCheck
-                      weight="fill"
-                      className="size-4 text-primary"
-                    />
-                  )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  @{campaign.creator.handle} ·{" "}
-                  {formatCompactNumber(campaign.creator.followers ?? 0)}{" "}
-                  followers
-                </p>
               </div>
+              <TrustBadge
+                trust={campaign.creator.trust}
+                side="creator"
+                variant="detail"
+              />
             </CardContent>
           </Card>
 

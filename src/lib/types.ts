@@ -21,6 +21,25 @@ export type SubmissionStatus =
 
 export type RequirementsType = "native" | "google_doc"
 
+export interface TrustWindow {
+  creatorPaidCount: number
+  creatorVerifiedCount: number
+  creatorPaidRate: number | null
+  clipperApprovedCount: number
+  clipperDecidedCount: number
+  clipperApprovalRate: number | null
+  clipperPaidCount: number
+  clipperDisputedCount: number
+  clipperDisputeFreeRate: number | null
+  clipperScore: number | null
+}
+
+export interface TrustScore {
+  ninetyDay: TrustWindow
+  allTime: TrustWindow
+  lastPayoutAt: string | null
+}
+
 export interface Creator {
   id: string
   name: string
@@ -28,6 +47,7 @@ export interface Creator {
   avatarUrl: string
   verified?: boolean
   followers?: number
+  trust?: TrustScore | null
 }
 
 export interface Campaign {
@@ -96,6 +116,19 @@ export interface Submission {
   pendingEarnings?: number
   aiReviewResult?: "clean" | "flagged"
   aiNotes?: string
+  payoutEvent?: PayoutEventSummary | null
+  fanTrust?: TrustScore | null
+}
+
+export interface PayoutEventSummary {
+  id: string
+  method: PayoutMethod
+  amountCents: number
+  createdAt: string
+  confirmedAt: string | null
+  disputedAt: string | null
+  disputeResolution: "confirmed" | "rejected" | null
+  txHash: string | null
 }
 
 export interface SubmissionSnapshot {

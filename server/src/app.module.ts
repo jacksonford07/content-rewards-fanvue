@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { AdminModule } from "./admin/admin.module.js";
 import { AnalyticsModule } from "./analytics/analytics.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { CampaignsModule } from "./campaigns/campaigns.module.js";
@@ -7,6 +8,7 @@ import { CronModule } from "./cron/cron.module.js";
 import { DbModule } from "./db/db.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
 import { SubmissionsModule } from "./submissions/submissions.module.js";
+import { TrustModule } from "./trust/trust.module.js";
 import { UsersModule } from "./users/users.module.js";
 
 @Module({
@@ -17,9 +19,11 @@ import { UsersModule } from "./users/users.module.js";
     UsersModule,
     CampaignsModule,
     SubmissionsModule,
+    TrustModule,
     NotificationsModule,
     AnalyticsModule,
     CronModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

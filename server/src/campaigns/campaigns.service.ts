@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 import { and, desc, eq, gt, ilike, inArray, not, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
+import { TrustService, type TrustScore } from "../trust/trust.service.js";
 
 function generatePrivateSlug(): string {
   return randomBytes(9)
@@ -45,7 +46,10 @@ async function probeDriveFile(fileId: string): Promise<boolean> {
 
 @Injectable()
 export class CampaignsService {
-  constructor(@Inject(DB) private db: Database) {}
+  constructor(
+    @Inject(DB) private db: Database,
+    private trust: TrustService,
+  ) {}
 
   async sourceStatus(id: string): Promise<{ available: boolean }> {
     const [campaign] = await this.db
@@ -135,6 +139,33 @@ export class CampaignsService {
       conditions.push(ilike(schema.campaigns.title, `%${filters.search}%`));
     }
 
+    // M3.3 — default sort by creator trust descending. Tiebreakers:
+    // 90-day count desc, then total_budget_cents desc, then created_at
+    // desc (final stable ordering).
+    //
+    // The score we sort on is the count of confirmed payouts within the
+    // window — see CC1/D4 for why we don't sort on rate.
+    const trustOrderClauses = sql.join(
+      [
+        sql`(SELECT count(*) FROM ${schema.payoutEvents} pe
+              WHERE pe.creator_id = ${schema.campaigns.creatorId}
+                AND (pe.confirmed_at IS NOT NULL
+                     OR (pe.created_at < now() - interval '7 days' AND pe.disputed_at IS NULL))
+                AND (pe.dispute_resolution IS DISTINCT FROM 'rejected')
+            ) DESC`,
+        sql`(SELECT count(*) FROM ${schema.payoutEvents} pe
+              WHERE pe.creator_id = ${schema.campaigns.creatorId}
+                AND pe.created_at >= now() - interval '90 days'
+                AND (pe.confirmed_at IS NOT NULL
+                     OR (pe.created_at < now() - interval '7 days' AND pe.disputed_at IS NULL))
+                AND (pe.dispute_resolution IS DISTINCT FROM 'rejected')
+            ) DESC`,
+        sql`${schema.campaigns.totalBudgetCents} DESC`,
+        sql`${schema.campaigns.createdAt} DESC`,
+      ],
+      sql`, `,
+    );
+
     let orderBy;
     switch (filters.sort) {
       case "rate_high":
@@ -153,7 +184,7 @@ export class CampaignsService {
         );
         break;
       default:
-        orderBy = desc(schema.campaigns.createdAt);
+        orderBy = trustOrderClauses;
     }
 
     const [totalResult] = await this.db
@@ -200,9 +231,12 @@ export class CampaignsService {
     const creatorsMap = new Map(creators.map((c) => [c.id, c]));
     const statsMap = new Map(submissionStats.map((s) => [s.campaignId, s]));
     const reservedMap = await this.loadReservedMap(campaignIds);
+    const trustMap = await this.trust.getTrustScoresByIds(creatorIds);
 
     return {
-      data: rows.map((c) => this.serialize(c, creatorsMap, statsMap, reservedMap)),
+      data: rows.map((c) =>
+        this.serialize(c, creatorsMap, statsMap, reservedMap, trustMap),
+      ),
       meta: {
         page,
         limit,
@@ -286,8 +320,15 @@ export class CampaignsService {
     const creatorsMap = new Map([[creator!.id, creator!]]);
     const statsMap = new Map([[campaign.id, stats!]]);
     const reservedMap = await this.loadReservedMap([campaign.id]);
+    const trustMap = await this.trust.getTrustScoresByIds([campaign.creatorId]);
 
-    return this.serialize(campaign, creatorsMap, statsMap, reservedMap);
+    return this.serialize(
+      campaign,
+      creatorsMap,
+      statsMap,
+      reservedMap,
+      trustMap,
+    );
   }
 
   async topCampaigns(limit = 10, viewerId?: string) {
@@ -770,6 +811,7 @@ export class CampaignsService {
       }
     >,
     reservedMap?: Map<string, number>,
+    trustMap?: Map<string, TrustScore>,
   ) {
     const creator = creatorsMap.get(c.creatorId);
     const stats = statsMap.get(c.id);
@@ -778,6 +820,7 @@ export class CampaignsService {
       c.totalBudgetCents - c.budgetSpentCents - reservedCents,
       0,
     );
+    const trust = trustMap?.get(c.creatorId);
     return {
       id: c.id,
       creator: creator
@@ -787,6 +830,13 @@ export class CampaignsService {
             handle: creator.handle,
             avatarUrl: creator.avatarUrl ?? "",
             verified: true,
+            trust: trust
+              ? {
+                  ninetyDay: trust.windows.ninetyDay,
+                  allTime: trust.windows.allTime,
+                  lastPayoutAt: trust.lastPayoutAt,
+                }
+              : null,
           }
         : null,
       title: c.title,

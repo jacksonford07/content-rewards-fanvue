@@ -144,4 +144,26 @@ export class SubmissionsController {
   ) {
     return this.submissionsService.markPaid(id, req.user.id, body);
   }
+
+  // M3.5 — clipper confirms / disputes a payout.
+  @Post(":id/confirm-payout")
+  confirmPayout(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.submissionsService.confirmPayout(id, req.user.id);
+  }
+
+  @Post(":id/dispute-payout")
+  disputePayout(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+    @Body() body: { reason?: string },
+  ) {
+    return this.submissionsService.disputePayout(
+      id,
+      req.user.id,
+      body.reason,
+    );
+  }
 }

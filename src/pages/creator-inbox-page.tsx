@@ -72,6 +72,7 @@ import {
 } from "@/queries/submissions"
 import { PaginationBar } from "@/components/pagination-bar"
 import { MarkPaidDialog } from "@/components/mark-paid-dialog"
+import { TrustBadge } from "@/components/trust-badge"
 import type { Submission } from "@/lib/types"
 
 type TabKey = InboxTab
@@ -509,8 +510,17 @@ function InboxRow({
                 <AvatarImage src={submission.fanAvatarUrl} />
                 <AvatarFallback>{submission.fanName.charAt(0)}</AvatarFallback>
               </Avatar>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{submission.fanName}</p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-semibold">
+                    {submission.fanName}
+                  </p>
+                  <TrustBadge
+                    trust={submission.fanTrust}
+                    side="clipper"
+                    variant="inbox-row"
+                  />
+                </div>
                 <p className="truncate text-xs text-muted-foreground">
                   @{submission.fanHandle} · {platformLabels[submission.platform]}
                   {submission.platformUsername

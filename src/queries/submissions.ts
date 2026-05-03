@@ -325,6 +325,41 @@ export function useMarkPaid(
   })
 }
 
+// M3.5 — clipper confirmation / dispute
+export function useConfirmPayout(options?: TMutationOptions<unknown, string>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/submissions/${id}/confirm-payout`)
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function useDisputePayout(
+  options?: TMutationOptions<unknown, { id: string; reason?: string }>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, reason }) => {
+      const res = await api.post(`/submissions/${id}/dispute-payout`, {
+        reason,
+      })
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
 export function useDevFastForward(
   options?: TMutationOptions<{ lockDate: string }, string>,
 ) {
