@@ -26,15 +26,39 @@ export class AuthService {
     return this.jwt.sign({ sub: userId });
   }
 
-  async findOrCreateDevUser(role: "clipper" | "creator") {
-    const email = role === "creator"
-      ? "dev-creator@test.local"
-      : "dev-clipper@test.local";
+  async findOrCreateDevUser(role: "clipper" | "creator" | "admin") {
+    // The "admin" pseudo-role is just a creator with a known email that's
+    // in ADMIN_EMAILS — admin status itself is not a column on users, it's
+    // an email-allowlist check (see admin.service.assertAdmin).
+    const fixtures: Record<
+      "clipper" | "creator" | "admin",
+      { email: string; handle: string; displayName: string; userRole: "clipper" | "creator" }
+    > = {
+      clipper: {
+        email: "dev-clipper@test.local",
+        handle: "dev_clipper",
+        displayName: "Dev Clipper",
+        userRole: "clipper",
+      },
+      creator: {
+        email: "dev-creator@test.local",
+        handle: "dev_creator",
+        displayName: "Dev Creator",
+        userRole: "creator",
+      },
+      admin: {
+        email: "dev-admin@test.local",
+        handle: "dev_admin",
+        displayName: "Dev Admin",
+        userRole: "creator",
+      },
+    };
+    const fixture = fixtures[role];
 
     const [existing] = await this.db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, email))
+      .where(eq(schema.users.email, fixture.email))
       .limit(1);
 
     if (existing) {
@@ -44,12 +68,12 @@ export class AuthService {
     const [user] = await this.db
       .insert(schema.users)
       .values({
-        email,
-        handle: role === "creator" ? "dev_creator" : "dev_clipper",
-        displayName: role === "creator" ? "Dev Creator" : "Dev Clipper",
-        role,
+        email: fixture.email,
+        handle: fixture.handle,
+        displayName: fixture.displayName,
+        role: fixture.userRole,
         fanvueId: `dev-${role}`,
-        fanvueHandle: role === "creator" ? "dev_creator" : "dev_clipper",
+        fanvueHandle: fixture.handle,
       })
       .returning();
 

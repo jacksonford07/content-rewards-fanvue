@@ -196,6 +196,18 @@ export function LoginPage() {
                         >
                           Creator
                         </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            const apiUrl =
+                              import.meta.env.VITE_API_URL || ""
+                            window.location.href = `${apiUrl}/api/auth/dev-login?role=admin`
+                          }}
+                        >
+                          Admin
+                        </Button>
                       </div>
                     </div>
                   )}

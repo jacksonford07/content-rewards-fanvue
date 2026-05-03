@@ -92,11 +92,11 @@ export class AuthController {
       throw new BadRequestException("Dev login is only available in development");
     }
 
-    if (!role || !["clipper", "creator"].includes(role)) {
-      throw new BadRequestException("Role must be 'clipper' or 'creator'");
+    if (!role || !["clipper", "creator", "admin"].includes(role)) {
+      throw new BadRequestException("Role must be 'clipper', 'creator', or 'admin'");
     }
 
-    const user = await this.authService.findOrCreateDevUser(role as "clipper" | "creator");
+    const user = await this.authService.findOrCreateDevUser(role as "clipper" | "creator" | "admin");
     const jwt = this.authService.signToken(user.id);
 
     const frontendUrl = this.config.get<string>("FRONTEND_URL", "http://localhost:5173");
