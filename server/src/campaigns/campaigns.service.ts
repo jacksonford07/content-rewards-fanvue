@@ -411,6 +411,7 @@ export class CampaignsService {
       maxPayoutPerClip?: number;
       status?: string;
       isPrivate?: boolean;
+      acceptedPayoutMethods?: string[];
     },
   ) {
     // v1.1: no escrow / wallet — campaigns publish directly to "active"
@@ -418,6 +419,16 @@ export class CampaignsService {
     const requestedStatus = data.status;
     const status: "draft" | "active" =
       requestedStatus === "active" ? "active" : "draft";
+    if (status === "active") {
+      if (
+        !data.acceptedPayoutMethods ||
+        data.acceptedPayoutMethods.length === 0
+      ) {
+        throw new BadRequestException(
+          "Pick at least one payout method before publishing",
+        );
+      }
+    }
     const isPrivate = data.isPrivate === true;
     const [campaign] = await this.db
       .insert(schema.campaigns)
@@ -432,6 +443,8 @@ export class CampaignsService {
         sourceContentUrl: data.sourceContentUrl,
         sourceThumbnailUrl: data.sourceThumbnailUrl,
         allowedPlatforms: data.allowedPlatforms ?? [],
+        acceptedPayoutMethods:
+          (data.acceptedPayoutMethods as schema.PayoutMethod[]) ?? [],
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -512,6 +525,9 @@ export class CampaignsService {
         );
       if (data.totalBudget !== undefined)
         updateData.totalBudgetCents = Math.round(data.totalBudget * 100);
+      if ((data as { acceptedPayoutMethods?: string[] }).acceptedPayoutMethods !== undefined) {
+        updateData.acceptedPayoutMethods = (data as { acceptedPayoutMethods?: string[] }).acceptedPayoutMethods;
+      }
       if (data.minPayoutThreshold !== undefined)
         updateData.minPayoutThreshold = Math.round(data.minPayoutThreshold);
       if (data.maxPayoutPerClip !== undefined)
@@ -781,6 +797,7 @@ export class CampaignsService {
       sourceContentUrl: c.sourceContentUrl,
       sourceThumbnailUrl: c.sourceThumbnailUrl,
       allowedPlatforms: c.allowedPlatforms,
+      acceptedPayoutMethods: c.acceptedPayoutMethods,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,
@@ -814,6 +831,7 @@ export class CampaignsService {
       sourceContentUrl: c.sourceContentUrl,
       sourceThumbnailUrl: c.sourceThumbnailUrl,
       allowedPlatforms: c.allowedPlatforms,
+      acceptedPayoutMethods: c.acceptedPayoutMethods,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
       budgetSpent: c.budgetSpentCents / 100,

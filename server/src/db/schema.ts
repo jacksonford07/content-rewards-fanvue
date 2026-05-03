@@ -17,6 +17,32 @@ export interface SourceKeyframe {
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 
+export const PAYOUT_METHODS = [
+  "paypal",
+  "wise",
+  "usdc_eth",
+  "usdc_sol",
+  "eth",
+  "sol",
+  "btc",
+  "bank_uk",
+  "bank_us",
+  "bank_iban",
+  "cashapp",
+  "venmo",
+] as const;
+
+export type PayoutMethod = (typeof PAYOUT_METHODS)[number];
+
+export const CONTACT_CHANNELS = [
+  "telegram",
+  "whatsapp",
+  "phone",
+  "email",
+] as const;
+
+export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
+
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: text("email").notNull().unique(),
@@ -30,6 +56,9 @@ export const users = pgTable("users", {
   role: text("role", { enum: ["clipper", "creator", "both"] })
     .default("clipper")
     .notNull(),
+  // M2: clipper contact channel for off-platform payouts.
+  contactChannel: text("contact_channel", { enum: CONTACT_CHANNELS }),
+  contactValue: text("contact_value"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -64,6 +93,14 @@ export const campaigns = pgTable("campaigns", {
   budgetSpentCents: integer("budget_spent_cents").default(0).notNull(),
   minPayoutThreshold: integer("min_payout_threshold").default(0).notNull(),
   maxPayoutPerClipCents: integer("max_payout_per_clip_cents"),
+  // M2: which off-platform payout methods this campaign accepts.
+  // Postgres array of PayoutMethod values; overlap with the clipper's
+  // accepted methods gates submission (see M2.3 OverlapGate).
+  acceptedPayoutMethods: text("accepted_payout_methods")
+    .array()
+    .$type<PayoutMethod[]>()
+    .default([])
+    .notNull(),
   status: text("status", {
     enum: ["draft", "pending_budget", "active", "paused", "completed"],
   })
@@ -181,6 +218,71 @@ export const notifications = pgTable("notifications", {
     .notNull(),
 });
 
+// ─── Clipper Payout Methods (M2.1) ───────────────────────────────────────────
+
+export const clipperPayoutMethods = pgTable(
+  "clipper_payout_methods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    method: text("method", { enum: PAYOUT_METHODS }).notNull(),
+    value: text("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  // One row per user-per-method. Re-saving overwrites via upsert.
+  (table) => [
+    primaryKey({ name: "clipper_payout_methods_user_method_pk", columns: [table.userId, table.method] }),
+  ],
+);
+
+// ─── Payout Events (M2.4 — off-platform payment ledger) ──────────────────────
+//
+// Append-only ledger written when a creator marks a submission paid. Trust
+// score (M3) reads from this table; clipper confirmation (M3.5) and dispute
+// (M3.6) flip the corresponding timestamp columns.
+
+export const payoutEvents = pgTable("payout_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id")
+    .notNull()
+    .references(() => submissions.id, { onDelete: "cascade" }),
+  creatorId: uuid("creator_id")
+    .notNull()
+    .references(() => users.id),
+  clipperId: uuid("clipper_id")
+    .notNull()
+    .references(() => users.id),
+  method: text("method", { enum: PAYOUT_METHODS }).notNull(),
+  // Snapshot of the clipper's saved value at mark-paid time. We don't
+  // live-link to clipperPayoutMethods because that row can change later.
+  valueSnapshot: text("value_snapshot").notNull(),
+  // Snapshot of the submission's accrued payout at mark-paid time.
+  amountCents: integer("amount_cents").notNull(),
+  // Optional free-text reference (e.g. PayPal transaction ID, bank ref).
+  reference: text("reference"),
+  // M2.5 Tier A: optional on-chain transaction hash for crypto methods.
+  txHash: text("tx_hash"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  // M3.5: clipper confirmed receipt. NULL = pending.
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  // M3.6: clipper raised a dispute. NULL = no dispute.
+  disputedAt: timestamp("disputed_at", { withTimezone: true }),
+  // M3.6 admin resolution. NULL = open or never disputed.
+  disputeResolvedAt: timestamp("dispute_resolved_at", { withTimezone: true }),
+  disputeResolution: text("dispute_resolution", {
+    enum: ["confirmed", "rejected"],
+  }),
+});
+
 // ─── Campaign Bans ───────────────────────────────────────────────────────────
 
 export const campaignBans = pgTable(
@@ -205,6 +307,32 @@ export const usersRelations = relations(users, ({ many }) => ({
   campaigns: many(campaigns),
   submissions: many(submissions),
   notifications: many(notifications),
+  payoutMethods: many(clipperPayoutMethods),
+}));
+
+export const clipperPayoutMethodsRelations = relations(
+  clipperPayoutMethods,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [clipperPayoutMethods.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const payoutEventsRelations = relations(payoutEvents, ({ one }) => ({
+  submission: one(submissions, {
+    fields: [payoutEvents.submissionId],
+    references: [submissions.id],
+  }),
+  creator: one(users, {
+    fields: [payoutEvents.creatorId],
+    references: [users.id],
+  }),
+  clipper: one(users, {
+    fields: [payoutEvents.clipperId],
+    references: [users.id],
+  }),
 }));
 
 export const campaignsRelations = relations(campaigns, ({ one, many }) => ({

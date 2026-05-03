@@ -60,6 +60,8 @@ function filterInboxByTab<T extends EnrichedSubmission>(
       return rows.filter((s) => s.status === "rejected" && !s.isBanned);
     case "banned":
       return rows.filter((s) => s.status === "rejected" && !!s.isBanned);
+    case "ready_to_pay":
+      return rows.filter((s) => s.status === "ready_to_pay");
     case "paid":
       return rows.filter(
         (s) => s.status === "paid" || s.status === "paid_off_platform",
@@ -141,6 +143,25 @@ export class SubmissionsService {
       .limit(1);
 
     if (ban) throw new ForbiddenException("You are banned from this campaign");
+
+    // M2.3 — payout-method overlap gate. Clipper must have at least one
+    // method that the campaign accepts; otherwise day-30 has nothing to
+    // settle on. Defence-in-depth — frontend also gates the submit button.
+    if (campaign.acceptedPayoutMethods.length > 0) {
+      const clipperMethods = await this.db
+        .select({ method: schema.clipperPayoutMethods.method })
+        .from(schema.clipperPayoutMethods)
+        .where(eq(schema.clipperPayoutMethods.userId, fanId));
+      const clipperSet = new Set(clipperMethods.map((m) => m.method));
+      const overlap = campaign.acceptedPayoutMethods.some((m) =>
+        clipperSet.has(m),
+      );
+      if (!overlap) {
+        throw new BadRequestException(
+          `This creator pays in ${campaign.acceptedPayoutMethods.join(", ")}. Add one of these to your payout settings to submit.`,
+        );
+      }
+    }
 
     const autoApproveAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const postUrl = await resolveShortUrl(data.postUrl);
@@ -507,6 +528,7 @@ export class SubmissionsService {
       pending: 0,
       approved: 0,
       verify: 0,
+      ready_to_pay: 0,
       rejected: 0,
       banned: 0,
       paid: 0,
@@ -530,11 +552,157 @@ export class SubmissionsService {
       pending: filterInboxByTab(enriched, "pending").length,
       approved: filterInboxByTab(enriched, "approved").length,
       verify: filterInboxByTab(enriched, "verify").length,
+      ready_to_pay: filterInboxByTab(enriched, "ready_to_pay").length,
       rejected: filterInboxByTab(enriched, "rejected").length,
       banned: filterInboxByTab(enriched, "banned").length,
       paid: filterInboxByTab(enriched, "paid").length,
       disputed: filterInboxByTab(enriched, "disputed").length,
     };
+  }
+
+  // ── Off-platform payout (M2.4) ─────────────────────────────────────────
+
+  async getPayoutContext(submissionId: string, creatorId: string) {
+    const [submission] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submissionId))
+      .limit(1);
+    if (!submission) throw new NotFoundException("Submission not found");
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+
+    const [clipper] = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, submission.fanId))
+      .limit(1);
+
+    const clipperMethods = await this.db
+      .select()
+      .from(schema.clipperPayoutMethods)
+      .where(eq(schema.clipperPayoutMethods.userId, submission.fanId));
+
+    const overlap = campaign.acceptedPayoutMethods.filter((m) =>
+      clipperMethods.some((cm) => cm.method === m),
+    );
+
+    return {
+      submission: {
+        id: submission.id,
+        status: submission.status,
+        payoutAmountCents: submission.payoutAmountCents ?? 0,
+      },
+      campaign: {
+        id: campaign.id,
+        title: campaign.title,
+        acceptedPayoutMethods: campaign.acceptedPayoutMethods,
+      },
+      clipper: {
+        id: clipper?.id,
+        displayName: clipper?.displayName ?? "",
+        handle: clipper?.handle ?? "",
+        contactChannel: clipper?.contactChannel ?? null,
+        contactValue: clipper?.contactValue ?? null,
+      },
+      // Methods both sides have agreed to. Pre-fill from this list.
+      overlapMethods: overlap,
+      clipperSavedMethods: clipperMethods.map((cm) => ({
+        method: cm.method,
+        value: cm.value,
+      })),
+    };
+  }
+
+  async markPaid(
+    submissionId: string,
+    creatorId: string,
+    body: {
+      method: schema.PayoutMethod;
+      value: string;
+      reference?: string;
+      txHash?: string;
+    },
+  ) {
+    const [submission] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submissionId))
+      .limit(1);
+    if (!submission) throw new NotFoundException("Submission not found");
+    if (submission.status !== "ready_to_pay") {
+      throw new BadRequestException(
+        `Can only mark paid when submission is in 'ready_to_pay' state (currently '${submission.status}')`,
+      );
+    }
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+
+    if (
+      campaign.acceptedPayoutMethods.length > 0 &&
+      !campaign.acceptedPayoutMethods.includes(body.method)
+    ) {
+      throw new BadRequestException(
+        `Method '${body.method}' is not in this campaign's accepted methods`,
+      );
+    }
+    if (!body.value || !body.value.trim()) {
+      throw new BadRequestException("Recipient value required");
+    }
+
+    // Idempotent: if a payout_event already exists for this submission,
+    // return it rather than creating a second one.
+    const [existing] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (existing) {
+      return { event: existing, status: submission.status, idempotent: true };
+    }
+
+    const [event] = await this.db
+      .insert(schema.payoutEvents)
+      .values({
+        submissionId,
+        creatorId,
+        clipperId: submission.fanId,
+        method: body.method,
+        valueSnapshot: body.value.trim(),
+        amountCents: submission.payoutAmountCents ?? 0,
+        reference: body.reference?.trim() || null,
+        txHash: body.txHash?.trim() || null,
+      })
+      .returning();
+
+    await this.db
+      .update(schema.submissions)
+      .set({ status: "paid_off_platform", updatedAt: new Date() })
+      .where(eq(schema.submissions.id, submissionId));
+
+    // Notify the clipper that the creator has marked them paid. M3.5 will
+    // turn this into the "Did you receive payment?" confirmation flow.
+    await this.notifications.create({
+      userId: submission.fanId,
+      type: "payout_released",
+      title: `Marked paid: $${((submission.payoutAmountCents ?? 0) / 100).toFixed(2)}`,
+      message: `${campaign.title}'s creator marked your payout sent via ${body.method}. Confirm receipt or raise a dispute from your submissions page.`,
+      actionUrl: "/submissions",
+    });
+
+    return { event, status: "paid_off_platform" };
   }
 
   async byCampaign(campaignId: string, status?: string) {
