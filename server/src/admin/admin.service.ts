@@ -10,7 +10,11 @@ import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 
 function adminEmails(): string[] {
-  const raw = process.env.ADMIN_EMAILS ?? "jackson.ford@fanvue.com,iniaki.boudiaf@fanvue.com";
+  // Default allowlist: prod admins + the dev-admin Dev Login fixture.
+  // Override via ADMIN_EMAILS env var (comma-separated).
+  const raw =
+    process.env.ADMIN_EMAILS ??
+    "jackson.ford@fanvue.com,iniaki.boudiaf@fanvue.com,dev-admin@test.local";
   return raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
