@@ -7,6 +7,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -236,9 +237,10 @@ export const clipperPayoutMethods = pgTable(
       .defaultNow()
       .notNull(),
   },
-  // One row per user-per-method. Re-saving overwrites via upsert.
+  // One row per user-per-method (id stays the PK; (user_id, method) is
+  // a uniqueness constraint so upserts hit the right row).
   (table) => [
-    primaryKey({ name: "clipper_payout_methods_user_method_pk", columns: [table.userId, table.method] }),
+    unique("clipper_payout_methods_user_method_uq").on(table.userId, table.method),
   ],
 );
 
