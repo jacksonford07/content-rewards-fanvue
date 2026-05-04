@@ -13,6 +13,8 @@ import { AiVerificationService } from "../ai-verification/ai-verification.servic
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
+import { TrustService } from "../trust/trust.service.js";
+import { FanvueTrackingLinksService } from "../fanvue/fanvue-tracking-links.service.js";
 
 type EnrichedSubmission = {
   status: string;
@@ -60,8 +62,14 @@ function filterInboxByTab<T extends EnrichedSubmission>(
       return rows.filter((s) => s.status === "rejected" && !s.isBanned);
     case "banned":
       return rows.filter((s) => s.status === "rejected" && !!s.isBanned);
+    case "ready_to_pay":
+      return rows.filter((s) => s.status === "ready_to_pay");
     case "paid":
-      return rows.filter((s) => s.status === "paid");
+      return rows.filter(
+        (s) => s.status === "paid" || s.status === "paid_off_platform",
+      );
+    case "disputed":
+      return rows.filter((s) => s.status === "disputed");
     default:
       return rows;
   }
@@ -79,7 +87,9 @@ function filterMineByTab<T extends EnrichedSubmission>(
         (s) => s.status === "approved" || s.status === "auto_approved",
       );
     case "paid":
-      return rows.filter((s) => s.status === "paid");
+      return rows.filter(
+        (s) => s.status === "paid" || s.status === "paid_off_platform",
+      );
     case "rejected":
       return rows.filter((s) => s.status === "rejected" && !s.isBanned);
     case "banned":
@@ -99,6 +109,8 @@ export class SubmissionsService {
     private notifications: NotificationsService,
     private scrapers: ScrapersService,
     private aiVerification: AiVerificationService,
+    private trust: TrustService,
+    private fanvueLinks: FanvueTrackingLinksService,
   ) {}
 
   async submit(
@@ -135,6 +147,25 @@ export class SubmissionsService {
       .limit(1);
 
     if (ban) throw new ForbiddenException("You are banned from this campaign");
+
+    // M2.3 — payout-method overlap gate. Clipper must have at least one
+    // method that the campaign accepts; otherwise day-30 has nothing to
+    // settle on. Defence-in-depth — frontend also gates the submit button.
+    if (campaign.acceptedPayoutMethods.length > 0) {
+      const clipperMethods = await this.db
+        .select({ method: schema.clipperPayoutMethods.method })
+        .from(schema.clipperPayoutMethods)
+        .where(eq(schema.clipperPayoutMethods.userId, fanId));
+      const clipperSet = new Set(clipperMethods.map((m) => m.method));
+      const overlap = campaign.acceptedPayoutMethods.some((m) =>
+        clipperSet.has(m),
+      );
+      if (!overlap) {
+        throw new BadRequestException(
+          `This creator pays in ${campaign.acceptedPayoutMethods.join(", ")}. Add one of these to your payout settings to submit.`,
+        );
+      }
+    }
 
     const autoApproveAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const postUrl = await resolveShortUrl(data.postUrl);
@@ -501,9 +532,11 @@ export class SubmissionsService {
       pending: 0,
       approved: 0,
       verify: 0,
+      ready_to_pay: 0,
       rejected: 0,
       banned: 0,
       paid: 0,
+      disputed: 0,
     };
     if (ownedIds.size === 0) return empty;
 
@@ -523,10 +556,222 @@ export class SubmissionsService {
       pending: filterInboxByTab(enriched, "pending").length,
       approved: filterInboxByTab(enriched, "approved").length,
       verify: filterInboxByTab(enriched, "verify").length,
+      ready_to_pay: filterInboxByTab(enriched, "ready_to_pay").length,
       rejected: filterInboxByTab(enriched, "rejected").length,
       banned: filterInboxByTab(enriched, "banned").length,
       paid: filterInboxByTab(enriched, "paid").length,
+      disputed: filterInboxByTab(enriched, "disputed").length,
     };
+  }
+
+  // ── Off-platform payout (M2.4) ─────────────────────────────────────────
+
+  async getPayoutContext(submissionId: string, creatorId: string) {
+    const [submission] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submissionId))
+      .limit(1);
+    if (!submission) throw new NotFoundException("Submission not found");
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+
+    const [clipper] = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, submission.fanId))
+      .limit(1);
+
+    const clipperMethods = await this.db
+      .select()
+      .from(schema.clipperPayoutMethods)
+      .where(eq(schema.clipperPayoutMethods.userId, submission.fanId));
+
+    const overlap = campaign.acceptedPayoutMethods.filter((m) =>
+      clipperMethods.some((cm) => cm.method === m),
+    );
+
+    return {
+      submission: {
+        id: submission.id,
+        status: submission.status,
+        payoutAmountCents: submission.payoutAmountCents ?? 0,
+      },
+      campaign: {
+        id: campaign.id,
+        title: campaign.title,
+        acceptedPayoutMethods: campaign.acceptedPayoutMethods,
+      },
+      clipper: {
+        id: clipper?.id,
+        displayName: clipper?.displayName ?? "",
+        handle: clipper?.handle ?? "",
+        contactChannel: clipper?.contactChannel ?? null,
+        contactValue: clipper?.contactValue ?? null,
+      },
+      // Methods both sides have agreed to. Pre-fill from this list.
+      overlapMethods: overlap,
+      clipperSavedMethods: clipperMethods.map((cm) => ({
+        method: cm.method,
+        value: cm.value,
+      })),
+    };
+  }
+
+  async markPaid(
+    submissionId: string,
+    creatorId: string,
+    body: {
+      method: schema.PayoutMethod;
+      value: string;
+      reference?: string;
+      txHash?: string;
+    },
+  ) {
+    const [submission] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submissionId))
+      .limit(1);
+    if (!submission) throw new NotFoundException("Submission not found");
+    if (submission.status !== "ready_to_pay") {
+      throw new BadRequestException(
+        `Can only mark paid when submission is in 'ready_to_pay' state (currently '${submission.status}')`,
+      );
+    }
+
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+
+    if (
+      campaign.acceptedPayoutMethods.length > 0 &&
+      !campaign.acceptedPayoutMethods.includes(body.method)
+    ) {
+      throw new BadRequestException(
+        `Method '${body.method}' is not in this campaign's accepted methods`,
+      );
+    }
+    if (!body.value || !body.value.trim()) {
+      throw new BadRequestException("Recipient value required");
+    }
+
+    // Idempotent: if a payout_event already exists for this submission,
+    // return it rather than creating a second one.
+    const [existing] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (existing) {
+      return { event: existing, status: submission.status, idempotent: true };
+    }
+
+    const [event] = await this.db
+      .insert(schema.payoutEvents)
+      .values({
+        submissionId,
+        creatorId,
+        clipperId: submission.fanId,
+        method: body.method,
+        valueSnapshot: body.value.trim(),
+        amountCents: submission.payoutAmountCents ?? 0,
+        reference: body.reference?.trim() || null,
+        txHash: body.txHash?.trim() || null,
+      })
+      .returning();
+
+    await this.db
+      .update(schema.submissions)
+      .set({ status: "paid_off_platform", updatedAt: new Date() })
+      .where(eq(schema.submissions.id, submissionId));
+
+    // Notify the clipper that the creator has marked them paid. M3.5 will
+    // turn this into the "Did you receive payment?" confirmation flow.
+    await this.notifications.create({
+      userId: submission.fanId,
+      type: "payout_released",
+      title: `Marked paid: $${((submission.payoutAmountCents ?? 0) / 100).toFixed(2)}`,
+      message: `${campaign.title}'s creator marked your payout sent via ${body.method}. Confirm receipt or raise a dispute from your submissions page.`,
+      actionUrl: "/submissions",
+    });
+
+    return { event, status: "paid_off_platform" };
+  }
+
+  async confirmPayout(submissionId: string, clipperId: string) {
+    const [event] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (!event) throw new NotFoundException("Payout event not found");
+    if (event.clipperId !== clipperId) throw new ForbiddenException();
+    if (event.confirmedAt) {
+      return { event, idempotent: true };
+    }
+    if (event.disputedAt) {
+      throw new BadRequestException(
+        "Cannot confirm a disputed payout. Withdraw the dispute first.",
+      );
+    }
+    await this.db
+      .update(schema.payoutEvents)
+      .set({ confirmedAt: new Date() })
+      .where(eq(schema.payoutEvents.id, event.id));
+    return { ...event, confirmedAt: new Date() };
+  }
+
+  async disputePayout(
+    submissionId: string,
+    clipperId: string,
+    reason?: string,
+  ) {
+    const [event] = await this.db
+      .select()
+      .from(schema.payoutEvents)
+      .where(eq(schema.payoutEvents.submissionId, submissionId))
+      .limit(1);
+    if (!event) throw new NotFoundException("Payout event not found");
+    if (event.clipperId !== clipperId) throw new ForbiddenException();
+    if (event.confirmedAt) {
+      throw new BadRequestException(
+        "Cannot dispute a payout you already confirmed.",
+      );
+    }
+    if (event.disputedAt) {
+      return { event, idempotent: true };
+    }
+    await this.db
+      .update(schema.payoutEvents)
+      .set({ disputedAt: new Date() })
+      .where(eq(schema.payoutEvents.id, event.id));
+    // Move submission status to disputed so it surfaces in the creator's
+    // Disputed tab + the admin queue (M3.6).
+    await this.db
+      .update(schema.submissions)
+      .set({ status: "disputed", updatedAt: new Date() })
+      .where(eq(schema.submissions.id, submissionId));
+    // Notify the creator. No Slack webhook (CC1 D5 / M3.6 D5).
+    const reasonNote = reason?.trim() ? `\n\nReason: ${reason.trim()}` : "";
+    await this.notifications.create({
+      userId: event.creatorId,
+      type: "payout_released",
+      title: "Payout disputed",
+      message: `A clipper disputed a payout you marked sent. Review in the Disputed tab.${reasonNote}`,
+      actionUrl: "/creator/inbox?tab=disputed",
+    });
+    return { ...event, disputedAt: new Date() };
   }
 
   async byCampaign(campaignId: string, status?: string) {
@@ -541,7 +786,10 @@ export class SubmissionsService {
             | "rejected"
             | "auto_approved"
             | "paid"
-            | "paid",
+            | "paid_off_platform"
+            | "ready_to_pay"
+            | "disputed"
+            | "flagged",
         ),
       );
     }
@@ -579,6 +827,18 @@ export class SubmissionsService {
       .where(eq(schema.campaigns.id, submission.campaignId))
       .limit(1);
 
+    // M4.3 — mint a Fanvue tracking link for per-subscriber campaigns. Idempotent:
+    // re-approving a submission that already has a link is a no-op. Mint failures
+    // (auth, scope, rate limit) do not block the approval — they're logged and
+    // the link is retried later.
+    if (
+      campaign &&
+      campaign.payoutType === "per_subscriber" &&
+      !submission.trackingLinkUuid
+    ) {
+      await this.tryMintTrackingLink(submission, campaign);
+    }
+
     await this.notifications.create({
       userId: submission.fanId,
       type: "approved",
@@ -588,6 +848,60 @@ export class SubmissionsService {
     });
 
     return { success: true };
+  }
+
+  private async tryMintTrackingLink(
+    submission: typeof schema.submissions.$inferSelect,
+    campaign: typeof schema.campaigns.$inferSelect,
+  ) {
+    try {
+      const [creator] = await this.db
+        .select({
+          accessToken: schema.users.fanvueAccessToken,
+          scopes: schema.users.fanvueScopes,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, campaign.creatorId))
+        .limit(1);
+      if (!creator?.accessToken) {
+        this.logger.warn(
+          `Skipping tracking-link mint for submission ${submission.id}: creator has no Fanvue token`,
+        );
+        return;
+      }
+      if (!creator.scopes.includes("write:tracking_links")) {
+        this.logger.warn(
+          `Skipping tracking-link mint for submission ${submission.id}: creator missing write:tracking_links scope`,
+        );
+        return;
+      }
+      const [clipper] = await this.db
+        .select({ handle: schema.users.handle })
+        .from(schema.users)
+        .where(eq(schema.users.id, submission.fanId))
+        .limit(1);
+      const link = await this.fanvueLinks.createLink({
+        accessToken: creator.accessToken,
+        name: `${clipper?.handle ?? "clipper"} · ${campaign.title}`,
+        platform:
+          submission.platform as "tiktok" | "instagram" | "youtube",
+      });
+      await this.db
+        .update(schema.submissions)
+        .set({
+          trackingLinkUuid: link.uuid,
+          trackingLinkSlug: link.linkUrl,
+        })
+        .where(eq(schema.submissions.id, submission.id));
+      this.logger.log(
+        `Minted tracking link ${link.uuid} (${link.linkUrl}) for submission ${submission.id}`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Tracking link mint failed for submission ${submission.id}: ${err}`,
+      );
+      // Swallow — approval flow must succeed even if Fanvue is rate-limited.
+    }
   }
 
   async reject(id: string, creatorId: string, reason: string) {
@@ -723,28 +1037,25 @@ export class SubmissionsService {
       .limit(1);
     const payoutCents = fresh?.pending ?? 0;
 
-    // Update submission — clear pending earnings since they've been settled
+    // v1.1: payouts move off-platform. Day-30 lock flips the submission
+    // to 'ready_to_pay' and surfaces the accrued amount to the creator,
+    // who marks it paid via the M2 mark-paid flow once they've sent funds
+    // out-of-band. No in-app wallet credit, no escrow ledger writes.
     await this.db
       .update(schema.submissions)
       .set({
-        status: "paid",
+        status: "ready_to_pay",
         viewsAtDay30: views,
         payoutAmountCents: payoutCents,
-        pendingEarningsCents: 0,
         updatedAt: new Date(),
       })
       .where(eq(schema.submissions.id, submission.id));
 
     if (payoutCents > 0) {
-      // Credit clipper wallet
-      await this.db
-        .update(schema.users)
-        .set({
-          walletBalanceCents: sql`${schema.users.walletBalanceCents} + ${payoutCents}`,
-        })
-        .where(eq(schema.users.id, submission.fanId));
-
-      // Update campaign budget spent
+      // Track committed budget so the campaign-level "spent" view stays
+      // accurate. Once M2 ships the actual mark-paid flow, this column
+      // moves to track confirmed off-platform payouts only; for now it
+      // tracks day-30 commitments.
       await this.db
         .update(schema.campaigns)
         .set({
@@ -753,30 +1064,16 @@ export class SubmissionsService {
         })
         .where(eq(schema.campaigns.id, submission.campaignId));
 
-      // Wallet transaction for clipper
-      await this.db.insert(schema.walletTransactions).values({
-        userId: submission.fanId,
-        campaignId: submission.campaignId,
-        type: "payout",
-        description: `Payout for "${campaign.title}" — ${(views / 1000).toFixed(1)}K views`,
-        amountCents: payoutCents,
-      });
-
-      // Campaign transaction
-      await this.db.insert(schema.campaignTransactions).values({
-        campaignId: submission.campaignId,
-        type: "payout_release",
-        description: `Payout — ${(views / 1000).toFixed(1)}K views`,
-        amountCents: -payoutCents,
-      });
-
-      // Notify clipper
       await this.notifications.create({
         userId: submission.fanId,
         type: "payout_released",
-        title: `Payout released: $${(payoutCents / 100).toFixed(2)}`,
-        message: `Your earnings from "${campaign.title}" have been credited to your wallet.`,
-        actionUrl: "/wallet",
+        title: `Ready to pay: $${(payoutCents / 100).toFixed(2)}`,
+        message: `Your 30-day window on "${campaign.title}" has closed. ${
+          campaign.title
+        }'s creator will pay you $${(payoutCents / 100).toFixed(
+          2,
+        )} off-platform.`,
+        actionUrl: "/submissions",
       });
     }
 
@@ -786,7 +1083,7 @@ export class SubmissionsService {
     return {
       views,
       payoutAmount: payoutCents / 100,
-      status: "paid",
+      status: "ready_to_pay",
     };
   }
 
@@ -896,6 +1193,24 @@ export class SubmissionsService {
       bans.map((b) => [`${b.campaignId}:${b.userId}`, b.createdAt]),
     );
 
+    // M3.5: surface payout-event confirmation status alongside the
+    // submission so the clipper UI knows whether to show the
+    // confirm/dispute prompt or a "Confirmed" / "Under review" badge.
+    const submissionIds = rows.map((r) => r.id);
+    const payoutEvents =
+      submissionIds.length > 0
+        ? await this.db
+            .select()
+            .from(schema.payoutEvents)
+            .where(inArray(schema.payoutEvents.submissionId, submissionIds))
+        : [];
+    const payoutEventsMap = new Map(
+      payoutEvents.map((e) => [e.submissionId, e]),
+    );
+
+    // M3.7 — clipper trust score per row for the creator inbox.
+    const clipperTrustMap = await this.trust.getTrustScoresByIds(fanIds);
+
     const campaignsMap = new Map(campaignsList.map((c) => [c.id, c]));
     const fansMap = new Map(fans.map((f) => [f.id, f]));
     const creatorsMap = new Map(creators.map((c) => [c.id, c]));
@@ -961,6 +1276,34 @@ export class SubmissionsService {
           : 0,
         aiReviewResult: s.aiReviewResult ?? undefined,
         aiNotes: s.aiNotes ?? undefined,
+        payoutEvent: (() => {
+          const e = payoutEventsMap.get(s.id);
+          if (!e) return null;
+          return {
+            id: e.id,
+            method: e.method,
+            amountCents: e.amountCents,
+            createdAt: e.createdAt.toISOString(),
+            confirmedAt: e.confirmedAt?.toISOString() ?? null,
+            disputedAt: e.disputedAt?.toISOString() ?? null,
+            disputeResolution: e.disputeResolution,
+            txHash: e.txHash,
+          };
+        })(),
+        fanTrust: (() => {
+          const t = clipperTrustMap.get(s.fanId);
+          if (!t) return null;
+          return {
+            ninetyDay: t.windows.ninetyDay,
+            allTime: t.windows.allTime,
+            lastPayoutAt: t.lastPayoutAt,
+          };
+        })(),
+        trackingLinkUuid: s.trackingLinkUuid,
+        trackingLinkSlug: s.trackingLinkSlug,
+        trackingLinkUrl: s.trackingLinkSlug
+          ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
+          : null,
       };
     });
   }

@@ -43,14 +43,6 @@ async function main() {
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.notifications)
     .where(eq(schema.notifications.userId, devCreator.id));
-  const [walletClipper] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(schema.walletTransactions)
-    .where(eq(schema.walletTransactions.userId, devClipper.id));
-  const [walletCreator] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(schema.walletTransactions)
-    .where(eq(schema.walletTransactions.userId, devCreator.id));
   const [totalCampaigns] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.campaigns);
@@ -65,12 +57,10 @@ async function main() {
   console.log("─── dev_creator ───");
   console.log(`campaigns owned:               ${campaignsMine?.n}`);
   console.log(`notifications:                 ${notifCreator?.n}`);
-  console.log(`wallet transactions:           ${walletCreator?.n}`);
   console.log("");
   console.log("─── dev_clipper ───");
   console.log(`submissions:                   ${mySubs?.n}`);
   console.log(`notifications:                 ${notifClipper?.n}`);
-  console.log(`wallet transactions:           ${walletClipper?.n}`);
 }
 
 main().catch((err) => {

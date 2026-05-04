@@ -45,8 +45,13 @@ export class FanvueOAuthService {
 
   /**
    * Build the Fanvue authorization URL with PKCE and store verifier.
+   *
+   * `extraScopes` are appended to the default scope set when the caller
+   * needs additional permissions — e.g. when a creator is publishing a
+   * per-subscriber campaign for the first time and needs
+   * `read:tracking_links write:tracking_links`.
    */
-  generateAuthUrl(redirectUri: string): string {
+  generateAuthUrl(redirectUri: string, extraScopes: string[] = []): string {
     const clientId = this.config.getOrThrow("FANVUE_CLIENT_ID");
 
     const verifier = this.base64URLEncode(randomBytes(32));
@@ -61,11 +66,14 @@ export class FanvueOAuthService {
       createdAt: Date.now(),
     });
 
+    const baseScopes = ["read:self", "read:creator"];
+    const allScopes = [...new Set([...baseScopes, ...extraScopes])];
+
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "read:self read:creator",
+      scope: allScopes.join(" "),
       state,
       code_challenge: challenge,
       code_challenge_method: "S256",
@@ -92,7 +100,7 @@ export class FanvueOAuthService {
 
     const tokenData = await this.exchangeCodeForToken(code, stored);
     const profile = await this.fetchUserProfile(tokenData.access_token);
-    return this.findOrCreateUser(profile);
+    return this.findOrCreateUser(profile, tokenData.access_token, tokenData.scope);
   }
 
   /**
@@ -129,7 +137,7 @@ export class FanvueOAuthService {
       throw new BadRequestException("Failed to exchange authorization code");
     }
 
-    return (await res.json()) as { access_token: string };
+    return (await res.json()) as { access_token: string; scope?: string };
   }
 
   /**
@@ -164,17 +172,21 @@ export class FanvueOAuthService {
   /**
    * Find or create a local user by their Fanvue ID.
    */
-  private async findOrCreateUser(profile: {
-    uuid: string;
-    email: string;
-    handle: string;
-    displayName?: string;
-    avatarUrl?: string;
-    isCreator: boolean;
-  }) {
-    if (!profile.isCreator) {
-      throw new NotACreatorError();
-    }
+  private async findOrCreateUser(
+    profile: {
+      uuid: string;
+      email: string;
+      handle: string;
+      displayName?: string;
+      avatarUrl?: string;
+      isCreator: boolean;
+    },
+    accessToken: string,
+    scopeStr: string | undefined,
+  ) {
+    const scopes = (scopeStr ?? "").split(/\s+/).filter(Boolean);
+    // v1.1: KYC and the creator-only gate are gone — anyone signed into
+    // Fanvue can use the app, with role decided in the role-select screen.
     // Try to find by fanvueId
     const [existing] = await this.db
       .select()
@@ -183,7 +195,8 @@ export class FanvueOAuthService {
       .limit(1);
 
     if (existing) {
-      // Update profile info on each login
+      // Update profile info on each login + capture latest token + scope set.
+      const mergedScopes = [...new Set([...existing.fanvueScopes, ...scopes])];
       const [updated] = await this.db
         .update(schema.users)
         .set({
@@ -191,6 +204,8 @@ export class FanvueOAuthService {
           fanvueAvatarUrl: profile.avatarUrl ?? null,
           displayName: profile.displayName ?? existing.displayName,
           avatarUrl: profile.avatarUrl ?? existing.avatarUrl,
+          fanvueAccessToken: accessToken,
+          fanvueScopes: mergedScopes,
         })
         .where(eq(schema.users.id, existing.id))
         .returning();
@@ -210,6 +225,8 @@ export class FanvueOAuthService {
         fanvueId: profile.uuid,
         fanvueHandle: profile.handle,
         fanvueAvatarUrl: profile.avatarUrl ?? null,
+        fanvueAccessToken: accessToken,
+        fanvueScopes: scopes,
         role: "both",
       })
       .returning();

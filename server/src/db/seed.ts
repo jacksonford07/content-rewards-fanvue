@@ -22,10 +22,7 @@ async function seed() {
       displayName: "Alex Morgan",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=alex&backgroundColor=d4a574",
-      isCreator: true,
       role: "both",
-      kycStatus: "verified",
-      walletBalanceCents: 125000, // $1250
     })
     .returning();
 
@@ -36,7 +33,6 @@ async function seed() {
       displayName: "Sophia Reyes",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=sophia&backgroundColor=e8b4a0",
-      kycStatus: "verified" as const,
     },
     {
       email: "marcus@example.com",
@@ -44,7 +40,6 @@ async function seed() {
       displayName: "Marcus Chen",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=marcus&backgroundColor=b8a5d4",
-      kycStatus: "verified" as const,
     },
     {
       email: "luna@example.com",
@@ -52,7 +47,6 @@ async function seed() {
       displayName: "Luna Parker",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=luna&backgroundColor=a5c4d4",
-      kycStatus: "not_started" as const,
     },
     {
       email: "jordan@example.com",
@@ -60,7 +54,6 @@ async function seed() {
       displayName: "Jordan Blake",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=jordan&backgroundColor=d4c8a5",
-      kycStatus: "verified" as const,
     },
     {
       email: "ivy@example.com",
@@ -68,7 +61,6 @@ async function seed() {
       displayName: "Ivy Nakamura",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=ivy&backgroundColor=d4a5c4",
-      kycStatus: "verified" as const,
     },
     {
       email: "river@example.com",
@@ -76,7 +68,6 @@ async function seed() {
       displayName: "River Thompson",
       avatarUrl:
         "https://api.dicebear.com/9.x/glass/svg?seed=river&backgroundColor=a5d4c1",
-      kycStatus: "not_started" as const,
     },
   ];
 
@@ -86,9 +77,7 @@ async function seed() {
       creatorData.map((c) => ({
         ...c,
         passwordHash,
-        isCreator: true,
         role: "creator" as const,
-        walletBalanceCents: 500000,
       })),
     )
     .returning();
@@ -109,7 +98,6 @@ async function seed() {
         ...f,
         passwordHash,
         role: "clipper" as const,
-        walletBalanceCents: 5000,
       })),
     )
     .returning();
@@ -337,7 +325,7 @@ async function seed() {
       postUrl: "https://www.youtube.com/shorts/abc123",
       platform: "youtube",
       aiReviewResult: "clean",
-      status: "paid",
+      status: "paid_off_platform",
       viewsAtDay30: 152400,
       payoutAmountCents: 41910,
       creatorDecisionAt: new Date("2026-03-07T20:10:00Z"),
@@ -471,95 +459,6 @@ async function seed() {
 
   console.log("Created notifications");
 
-  // ─── Campaign Transactions ─────────────────────────────────────────────────
-  await db.insert(schema.campaignTransactions).values([
-    {
-      campaignId: ownCampaigns[0]!.id,
-      type: "escrow_lock",
-      description: "Initial budget escrowed",
-      amountCents: -500000,
-      status: "completed",
-      createdAt: new Date("2026-03-25T10:00:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[0]!.id,
-      type: "payout_release",
-      description: "Payout to Maya Okafor — 48.2K views",
-      amountCents: -19280,
-      status: "completed",
-      createdAt: new Date("2026-04-07T22:10:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[0]!.id,
-      type: "payout_release",
-      description: "Payout to Kai Thompson — 34.1K views",
-      amountCents: -13640,
-      status: "completed",
-      createdAt: new Date("2026-04-05T15:20:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[0]!.id,
-      type: "topup",
-      description: "Budget top-up via wallet",
-      amountCents: 100000,
-      status: "completed",
-      createdAt: new Date("2026-04-03T09:00:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[0]!.id,
-      type: "payout_release",
-      description: "Payout to Sam Pierce — 18.5K views",
-      amountCents: -7400,
-      status: "pending",
-      createdAt: new Date("2026-04-01T18:00:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[1]!.id,
-      type: "escrow_lock",
-      description: "Initial budget escrowed",
-      amountCents: -200000,
-      status: "completed",
-      createdAt: new Date("2026-04-01T10:00:00Z"),
-    },
-    {
-      campaignId: ownCampaigns[1]!.id,
-      type: "payout_release",
-      description: "Payout to clipper — 12.8K views",
-      amountCents: -4160,
-      status: "completed",
-      createdAt: new Date("2026-04-08T14:30:00Z"),
-    },
-  ]);
-
-  // ─── Wallet Transactions ───────────────────────────────────────────────────
-  await db.insert(schema.walletTransactions).values([
-    {
-      userId: currentUser!.id,
-      type: "topup",
-      description: "Wallet top-up: $2,000.00",
-      amountCents: 200000,
-      status: "completed",
-      createdAt: new Date("2026-03-20T10:00:00Z"),
-    },
-    {
-      userId: currentUser!.id,
-      type: "escrow_lock",
-      description: 'Budget funded for "My Fitness Campaign"',
-      amountCents: -500000,
-      status: "completed",
-      createdAt: new Date("2026-03-25T10:00:00Z"),
-    },
-    {
-      userId: currentUser!.id,
-      type: "payout",
-      description: 'Payout for "Fitness Transformation Series" — 152.4K views',
-      amountCents: 41910,
-      status: "completed",
-      createdAt: new Date("2026-04-06T20:10:00Z"),
-    },
-  ]);
-
-  console.log("Created transactions");
   console.log("Seed complete!");
 }
 

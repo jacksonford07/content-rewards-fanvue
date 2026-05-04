@@ -5,7 +5,6 @@ import {
   House,
   FilmSlate,
   ListChecks,
-  Wallet,
   MegaphoneSimple,
   Tray,
   ChartBar,
@@ -13,6 +12,8 @@ import {
   Sparkle,
   SignOut,
   CaretUpDown,
+  Wallet,
+  ShieldStar,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -89,7 +90,7 @@ export function AppSidebar() {
   const clipperNav = useMemo(() => [
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/submissions", label: "My submissions", icon: ListChecks, badge: counts.submissions || undefined },
-    { to: "/wallet", label: "Wallet & earnings", icon: Wallet },
+    { to: "/settings/payout", label: "Payout settings", icon: Wallet },
   ], [counts.submissions])
 
   const creatorNav = useMemo(() => [
@@ -97,12 +98,17 @@ export function AppSidebar() {
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
     { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
-    { to: "/wallet", label: "Wallet", icon: Wallet },
   ], [counts.inbox])
 
   const bottomNav = useMemo(() => [
     { to: "/notifications", label: "Notifications", icon: Bell, badge: counts.notifications || undefined },
   ], [counts.notifications])
+
+  // Admin pages — only rendered when the auth /me response says isAdmin.
+  // Sits in its own bottom group, just above the user dropdown.
+  const adminNav = useMemo(() => [
+    { to: "/admin/disputes", label: "Disputes", icon: ShieldStar },
+  ], [])
 
   const mainNav = role === "clipper" ? clipperNav : creatorNav
   const roleLabel = role === "clipper" ? "Clipper" : "Creator"
@@ -201,6 +207,36 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {user?.isAdmin && (
+          <>
+            <SidebarSeparator />
+            <SidebarGroup>
+              <SidebarGroupLabel>Admin</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {adminNav.map((item) => {
+                    const Icon = item.icon
+                    const active = location.pathname.startsWith(item.to)
+                    return (
+                      <SidebarMenuItem key={item.to}>
+                        <SidebarMenuButton asChild isActive={active}>
+                          <NavLink to={item.to}>
+                            <Icon
+                              className="size-5"
+                              weight={active ? "fill" : "regular"}
+                            />
+                            <span>{item.label}</span>
+                          </NavLink>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">

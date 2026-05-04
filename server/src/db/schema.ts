@@ -7,6 +7,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -16,6 +17,32 @@ export interface SourceKeyframe {
 }
 
 // ─── Users ───────────────────────────────────────────────────────────────────
+
+export const PAYOUT_METHODS = [
+  "paypal",
+  "wise",
+  "usdc_eth",
+  "usdc_sol",
+  "eth",
+  "sol",
+  "btc",
+  "bank_uk",
+  "bank_us",
+  "bank_iban",
+  "cashapp",
+  "venmo",
+] as const;
+
+export type PayoutMethod = (typeof PAYOUT_METHODS)[number];
+
+export const CONTACT_CHANNELS = [
+  "telegram",
+  "whatsapp",
+  "phone",
+  "email",
+] as const;
+
+export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -27,16 +54,15 @@ export const users = pgTable("users", {
   fanvueId: text("fanvue_id").unique(),
   fanvueHandle: text("fanvue_handle"),
   fanvueAvatarUrl: text("fanvue_avatar_url"),
-  isCreator: boolean("is_creator").default(false).notNull(),
   role: text("role", { enum: ["clipper", "creator", "both"] })
     .default("clipper")
     .notNull(),
-  kycStatus: text("kyc_status", {
-    enum: ["not_started", "in_progress", "verified", "rejected"],
-  })
-    .default("not_started")
-    .notNull(),
-  walletBalanceCents: integer("wallet_balance_cents").default(0).notNull(),
+  // M2: clipper contact channel for off-platform payouts.
+  contactChannel: text("contact_channel", { enum: CONTACT_CHANNELS }),
+  contactValue: text("contact_value"),
+  // M4: persisted Fanvue OAuth state for tracking-link calls.
+  fanvueAccessToken: text("fanvue_access_token"),
+  fanvueScopes: text("fanvue_scopes").array().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -71,6 +97,23 @@ export const campaigns = pgTable("campaigns", {
   budgetSpentCents: integer("budget_spent_cents").default(0).notNull(),
   minPayoutThreshold: integer("min_payout_threshold").default(0).notNull(),
   maxPayoutPerClipCents: integer("max_payout_per_clip_cents"),
+  // M2: which off-platform payout methods this campaign accepts.
+  // Postgres array of PayoutMethod values; overlap with the clipper's
+  // accepted methods gates submission (see M2.3 OverlapGate).
+  acceptedPayoutMethods: text("accepted_payout_methods")
+    .array()
+    .$type<PayoutMethod[]>()
+    .default([])
+    .notNull(),
+  // M4: per-1k-views or per-subscriber payout. Default per-1k-views
+  // preserves the v1 model.
+  payoutType: text("payout_type", {
+    enum: ["per_1k_views", "per_subscriber"],
+  })
+    .default("per_1k_views")
+    .notNull(),
+  // M4: cents-per-sub rate when payoutType = per_subscriber.
+  ratePerSubCents: integer("rate_per_sub_cents").default(0).notNull(),
   status: text("status", {
     enum: ["draft", "pending_budget", "active", "paused", "completed"],
   })
@@ -111,7 +154,17 @@ export const submissions = pgTable("submissions", {
   }),
   aiNotes: text("ai_notes"),
   status: text("status", {
-    enum: ["pending", "approved", "rejected", "auto_approved", "paid", "flagged"],
+    enum: [
+      "pending",
+      "approved",
+      "rejected",
+      "auto_approved",
+      "paid",
+      "flagged",
+      "ready_to_pay",
+      "paid_off_platform",
+      "disputed",
+    ],
   })
     .default("pending")
     .notNull(),
@@ -136,6 +189,14 @@ export const submissions = pgTable("submissions", {
   postDeletedAt: timestamp("post_deleted_at", { withTimezone: true }),
   platformUsername: text("platform_username"),
   pendingEarningsCents: integer("pending_earnings_cents").default(0).notNull(),
+  // M4: Fanvue tracking-link minted per accepted clipper-per-campaign.
+  // Populated on submission approve for per-subscriber campaigns.
+  trackingLinkUuid: text("tracking_link_uuid"),
+  // The slug returned by Fanvue (e.g. 'fv-123'). Surfaced to the clipper
+  // alongside the resolved redirect URL.
+  trackingLinkSlug: text("tracking_link_slug"),
+  // Snapshot of acquired subscribers at the last attribution cron run.
+  lastAcquiredSubs: integer("last_acquired_subs").default(0).notNull(),
 });
 
 // ─── Submission View Snapshots ───────────────────────────────────────────────
@@ -178,45 +239,72 @@ export const notifications = pgTable("notifications", {
     .notNull(),
 });
 
-// ─── Wallet Transactions ─────────────────────────────────────────────────────
+// ─── Clipper Payout Methods (M2.1) ───────────────────────────────────────────
 
-export const walletTransactions = pgTable("wallet_transactions", {
+export const clipperPayoutMethods = pgTable(
+  "clipper_payout_methods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    method: text("method", { enum: PAYOUT_METHODS }).notNull(),
+    value: text("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  // One row per user-per-method (id stays the PK; (user_id, method) is
+  // a uniqueness constraint so upserts hit the right row).
+  (table) => [
+    unique("clipper_payout_methods_user_method_uq").on(table.userId, table.method),
+  ],
+);
+
+// ─── Payout Events (M2.4 — off-platform payment ledger) ──────────────────────
+//
+// Append-only ledger written when a creator marks a submission paid. Trust
+// score (M3) reads from this table; clipper confirmation (M3.5) and dispute
+// (M3.6) flip the corresponding timestamp columns.
+
+export const payoutEvents = pgTable("payout_events", {
   id: uuid("id").defaultRandom().primaryKey(),
-  userId: uuid("user_id")
+  submissionId: uuid("submission_id")
+    .notNull()
+    .references(() => submissions.id, { onDelete: "cascade" }),
+  creatorId: uuid("creator_id")
     .notNull()
     .references(() => users.id),
-  campaignId: uuid("campaign_id").references(() => campaigns.id),
-  type: text("type", {
-    enum: ["payout", "withdrawal", "topup", "escrow_lock", "refund"],
-  }).notNull(),
-  description: text("description").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  status: text("status", { enum: ["completed", "pending"] })
-    .default("completed")
-    .notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
-// ─── Campaign Transactions ───────────────────────────────────────────────────
-
-export const campaignTransactions = pgTable("campaign_transactions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  campaignId: uuid("campaign_id")
+  clipperId: uuid("clipper_id")
     .notNull()
-    .references(() => campaigns.id),
-  type: text("type", {
-    enum: ["escrow_lock", "payout_release", "topup", "refund"],
-  }).notNull(),
-  description: text("description").notNull(),
+    .references(() => users.id),
+  method: text("method", { enum: PAYOUT_METHODS }).notNull(),
+  // Snapshot of the clipper's saved value at mark-paid time. We don't
+  // live-link to clipperPayoutMethods because that row can change later.
+  valueSnapshot: text("value_snapshot").notNull(),
+  // Snapshot of the submission's accrued payout at mark-paid time.
   amountCents: integer("amount_cents").notNull(),
-  status: text("status", { enum: ["completed", "pending"] })
-    .default("completed")
-    .notNull(),
+  // Optional free-text reference (e.g. PayPal transaction ID, bank ref).
+  reference: text("reference"),
+  // M2.5 Tier A: optional on-chain transaction hash for crypto methods.
+  txHash: text("tx_hash"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+  // M3.5: clipper confirmed receipt. NULL = pending.
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  // M3.6: clipper raised a dispute. NULL = no dispute.
+  disputedAt: timestamp("disputed_at", { withTimezone: true }),
+  // M3.6: clipper-supplied reason for the dispute (free text).
+  disputeReason: text("dispute_reason"),
+  // M3.6 admin resolution. NULL = open or never disputed.
+  disputeResolvedAt: timestamp("dispute_resolved_at", { withTimezone: true }),
+  disputeResolution: text("dispute_resolution", {
+    enum: ["confirmed", "rejected"],
+  }),
 });
 
 // ─── Campaign Bans ───────────────────────────────────────────────────────────
@@ -243,7 +331,32 @@ export const usersRelations = relations(users, ({ many }) => ({
   campaigns: many(campaigns),
   submissions: many(submissions),
   notifications: many(notifications),
-  walletTransactions: many(walletTransactions),
+  payoutMethods: many(clipperPayoutMethods),
+}));
+
+export const clipperPayoutMethodsRelations = relations(
+  clipperPayoutMethods,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [clipperPayoutMethods.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const payoutEventsRelations = relations(payoutEvents, ({ one }) => ({
+  submission: one(submissions, {
+    fields: [payoutEvents.submissionId],
+    references: [submissions.id],
+  }),
+  creator: one(users, {
+    fields: [payoutEvents.creatorId],
+    references: [users.id],
+  }),
+  clipper: one(users, {
+    fields: [payoutEvents.clipperId],
+    references: [users.id],
+  }),
 }));
 
 export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
@@ -252,7 +365,6 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
     references: [users.id],
   }),
   submissions: many(submissions),
-  transactions: many(campaignTransactions),
 }));
 
 export const submissionsRelations = relations(submissions, ({ one, many }) => ({
@@ -284,22 +396,3 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   }),
 }));
 
-export const walletTransactionsRelations = relations(
-  walletTransactions,
-  ({ one }) => ({
-    user: one(users, {
-      fields: [walletTransactions.userId],
-      references: [users.id],
-    }),
-  }),
-);
-
-export const campaignTransactionsRelations = relations(
-  campaignTransactions,
-  ({ one }) => ({
-    campaign: one(campaigns, {
-      fields: [campaignTransactions.campaignId],
-      references: [campaigns.id],
-    }),
-  }),
-);

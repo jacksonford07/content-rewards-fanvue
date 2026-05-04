@@ -194,30 +194,6 @@ export function useTopClippers(
   })
 }
 
-interface CampaignTransaction {
-  id: string
-  type: string
-  description: string
-  amount: number
-  at: string
-  status: string
-}
-
-export function useCampaignTransactions(
-  id: string | undefined,
-  options?: TQueryOptions<CampaignTransaction[]>,
-) {
-  return useQuery({
-    queryKey: [QK.campaigns.transactions, id] as const,
-    queryFn: async () => {
-      const res = await api.get<CampaignTransaction[]>(`/campaigns/${id}/transactions`)
-      return res.data
-    },
-    enabled: !!id,
-    ...options,
-  })
-}
-
 // ─── Mutations ────────────────────────────────────────────────────────────
 
 async function invalidateCampaignFamily(qc: ReturnType<typeof useQueryClient>) {
@@ -279,29 +255,6 @@ export function useUpdateCampaign(
   })
 }
 
-export function useFundCampaign(
-  options?: TMutationOptions<unknown, { id: string; amount: number }>,
-) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async ({ id, amount }) => {
-      const res = await api.post(`/campaigns/${id}/fund`, { amount })
-      return res.data
-    },
-    ...options,
-    onSuccess: async (...args) => {
-      await Promise.all([
-        invalidateCampaignFamily(qc),
-        qc.invalidateQueries({ queryKey: [QK.wallet.balance], refetchType: "all" }),
-        qc.invalidateQueries({ queryKey: [QK.wallet.transactions], refetchType: "all" }),
-        qc.invalidateQueries({ queryKey: [QK.auth.me], refetchType: "all" }),
-        qc.invalidateQueries({ queryKey: [QK.campaigns.transactions] }),
-      ])
-      options?.onSuccess?.(...args)
-    },
-  })
-}
-
 export function usePauseCampaign(
   options?: TMutationOptions<{ status: string }, string>,
 ) {
@@ -309,25 +262,6 @@ export function usePauseCampaign(
   return useMutation({
     mutationFn: async (id) => {
       const res = await api.post<{ status: string }>(`/campaigns/${id}/pause`)
-      return res.data
-    },
-    ...options,
-    onSuccess: async (...args) => {
-      await invalidateCampaignFamily(qc)
-      options?.onSuccess?.(...args)
-    },
-  })
-}
-
-export function useCompleteCampaign(
-  options?: TMutationOptions<{ refundedCents: number }, string>,
-) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (id) => {
-      const res = await api.post<{ refundedCents: number }>(
-        `/campaigns/${id}/complete`,
-      )
       return res.data
     },
     ...options,

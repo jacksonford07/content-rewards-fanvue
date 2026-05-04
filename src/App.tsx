@@ -14,13 +14,14 @@ import { HubPage } from "@/pages/hub-page"
 import { CampaignDetailPage } from "@/pages/campaign-detail-page"
 import { CampaignBySlugPage } from "@/pages/campaign-by-slug-page"
 import { MySubmissionsPage } from "@/pages/my-submissions-page"
-import { WalletPage } from "@/pages/wallet-page"
 import { CreatorCampaignsPage } from "@/pages/creator-campaigns-page"
 import { CreateCampaignPage } from "@/pages/create-campaign-page"
 import { CreatorInboxPage } from "@/pages/creator-inbox-page"
 import { CreatorAnalyticsPage } from "@/pages/creator-analytics-page"
 import { NotificationsPage } from "@/pages/notifications-page"
 import { CampaignBudgetPage } from "@/pages/campaign-budget-page"
+import { PayoutSettingsPage } from "@/pages/payout-settings-page"
+import { AdminDisputesPage } from "@/pages/admin-disputes-page"
 
 import { RoleSelectPage } from "@/pages/role-select-page"
 
@@ -55,7 +56,7 @@ export default function App() {
               <Route path="campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="c/:slug" element={<CampaignBySlugPage />} />
               <Route path="submissions" element={<MySubmissionsPage />} />
-              <Route path="wallet" element={<WalletPage />} />
+              <Route path="settings/payout" element={<PayoutSettingsPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route
                 path="creator/campaigns"
@@ -79,6 +80,7 @@ export default function App() {
                 path="creator/analytics"
                 element={<CreatorAnalyticsPage />}
               />
+              <Route path="admin/disputes" element={<AdminDisputesPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
