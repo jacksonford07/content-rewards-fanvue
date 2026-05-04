@@ -168,6 +168,17 @@ export function AdminDisputesPage() {
                   </div>
                 </div>
 
+                {row.disputeReason && (
+                  <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-xs">
+                    <p className="font-medium text-foreground">
+                      Clipper's reason
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                      {row.disputeReason}
+                    </p>
+                  </div>
+                )}
+
                 {row.txHash && (
                   <a
                     className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"

@@ -278,6 +278,8 @@ export const payoutEvents = pgTable("payout_events", {
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   // M3.6: clipper raised a dispute. NULL = no dispute.
   disputedAt: timestamp("disputed_at", { withTimezone: true }),
+  // M3.6: clipper-supplied reason for the dispute (free text).
+  disputeReason: text("dispute_reason"),
   // M3.6 admin resolution. NULL = open or never disputed.
   disputeResolvedAt: timestamp("dispute_resolved_at", { withTimezone: true }),
   disputeResolution: text("dispute_resolution", {

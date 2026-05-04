@@ -88,6 +88,7 @@ export class AdminService {
         txHash: e.txHash,
         createdAt: e.createdAt.toISOString(),
         disputedAt: e.disputedAt?.toISOString() ?? null,
+        disputeReason: e.disputeReason,
         disputeResolvedAt: e.disputeResolvedAt?.toISOString() ?? null,
         disputeResolution: e.disputeResolution,
         creator: {
