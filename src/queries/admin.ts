@@ -11,6 +11,7 @@ export interface DisputeRow {
   txHash: string | null
   createdAt: string
   disputedAt: string | null
+  disputeReason: string | null
   disputeResolvedAt: string | null
   disputeResolution: "confirmed" | "rejected" | null
   creator: { id: string; displayName: string; handle: string }
