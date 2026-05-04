@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactElement } from "react"
 import { Link } from "react-router-dom"
 import {
   CheckCircle,
@@ -199,7 +199,7 @@ export function PerSubClipperPanel({
 function ApplicationStatusBadge({ status }: { status: string }) {
   const map: Record<
     string,
-    { label: string; className: string; icon: JSX.Element }
+    { label: string; className: string; icon: ReactElement }
   > = {
     pending: {
       label: "Awaiting approval",

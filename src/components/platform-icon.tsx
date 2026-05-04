@@ -2,11 +2,12 @@ import type { Platform } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface PlatformIconProps {
-  platform: Platform
+  platform: Platform | null | undefined
   className?: string
 }
 
 export function PlatformIcon({ platform, className }: PlatformIconProps) {
+  if (!platform) return null
   const base = "inline-block shrink-0"
 
   if (platform === "tiktok") {

@@ -76,7 +76,7 @@ export function ViewTrendDialog({
               variant="outline"
               className="border-border/70 text-xs text-muted-foreground"
             >
-              {platformLabels[submission.platform]}
+              {submission.platform ? platformLabels[submission.platform] : "—"}
             </Badge>
           </DialogTitle>
           <DialogDescription className="truncate">
@@ -189,7 +189,7 @@ export function ViewTrendDialog({
         </div>
 
         <a
-          href={submission.postUrl}
+          href={submission.postUrl ?? undefined}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 self-end text-xs text-muted-foreground transition-colors hover:text-foreground"

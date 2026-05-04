@@ -833,7 +833,7 @@ export function CampaignDetailPage() {
                       </div>
                     )}
                     <Button variant="outline" size="sm" asChild>
-                      <a href={clip.postUrl} target="_blank" rel="noopener noreferrer">
+                      <a href={clip.postUrl ?? undefined} target="_blank" rel="noopener noreferrer">
                         View
                         <ArrowSquareOut className="size-3" />
                       </a>

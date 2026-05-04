@@ -305,8 +305,10 @@ function SubmissionRow({ submission }: { submission: Submission }) {
               {submission.campaignTitle}
             </Link>
             <p className="text-xs text-muted-foreground">
-              by {submission.campaignCreator} ·{" "}
-              {platformLabels[submission.platform]}
+              by {submission.campaignCreator}
+              {submission.platform
+                ? ` · ${platformLabels[submission.platform]}`
+                : ""}
               {submission.platformUsername
                 ? ` · @${submission.platformUsername}`
                 : ""}{" "}
@@ -435,7 +437,7 @@ function SubmissionRow({ submission }: { submission: Submission }) {
           )}
           <Button variant="outline" size="sm" asChild>
             <a
-              href={submission.postUrl}
+              href={submission.postUrl ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
             >

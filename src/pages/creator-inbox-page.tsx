@@ -522,7 +522,10 @@ function InboxRow({
                   />
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
-                  @{submission.fanHandle} · {platformLabels[submission.platform]}
+                  @{submission.fanHandle}
+                  {submission.platform
+                    ? ` · ${platformLabels[submission.platform]}`
+                    : ""}
                   {submission.platformUsername
                     ? ` · @${submission.platformUsername}`
                     : ""}{" "}
@@ -685,7 +688,7 @@ function InboxRow({
                 )}
                 <DropdownMenuItem asChild>
                   <a
-                    href={submission.postUrl}
+                    href={submission.postUrl ?? undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -738,7 +741,7 @@ function InboxRow({
             <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-1.5">
                 <Label htmlFor={`views-${submission.id}`} className="text-sm font-medium">
-                  Enter view count from {platformLabels[submission.platform]}
+                  Enter view count from {submission.platform ? platformLabels[submission.platform] : "the platform"}
                 </Label>
                 <Input
                   id={`views-${submission.id}`}
