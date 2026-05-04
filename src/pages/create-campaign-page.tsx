@@ -637,20 +637,73 @@ export function CreateCampaignPage() {
 
           {!loadingExisting && step === 5 && (
             <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Reward rate (USD per 1,000 views)</Label>
-                  <div className="relative">
-                    <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      className="pl-9 tabular-nums"
-                      value={state.rewardRate}
-                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("rewardRate", v) }}
-                    />
-                  </div>
+              {/* M4.1 — payout type toggle */}
+              <div className="space-y-2">
+                <Label>Payout type</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { v: "per_1k_views", label: "Per 1k views" },
+                      { v: "per_subscriber", label: "Per subscriber" },
+                    ] as const
+                  ).map((opt) => {
+                    const selected = state.payoutType === opt.v
+                    return (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => update("payoutType", opt.v)}
+                        className={cn(
+                          "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                          selected
+                            ? "border-primary/60 bg-primary/10 text-primary"
+                            : "border-border/70 bg-background/50 hover:border-border",
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
                 </div>
+                {state.payoutType === "per_subscriber" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Per-subscriber requires Fanvue tracking-link permission.
+                    If you haven't granted it yet you'll be prompted to
+                    re-authenticate before publish.
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {state.payoutType === "per_1k_views" ? (
+                  <div className="space-y-2">
+                    <Label>Reward rate (USD per 1,000 views)</Label>
+                    <div className="relative">
+                      <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        className="pl-9 tabular-nums"
+                        value={state.rewardRate}
+                        onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("rewardRate", v) }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label>Rate (USD per subscriber)</Label>
+                    <div className="relative">
+                      <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        className="pl-9 tabular-nums"
+                        value={state.ratePerSub}
+                        onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("ratePerSub", v) }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Total budget (min $100)</Label>
                   <div className="relative">
