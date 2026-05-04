@@ -72,6 +72,8 @@ export interface Campaign {
   isPrivate?: boolean
   privateSlug?: string | null
   acceptedPayoutMethods: PayoutMethod[]
+  payoutType: "per_1k_views" | "per_subscriber"
+  ratePerSub: number
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -118,6 +120,9 @@ export interface Submission {
   aiNotes?: string
   payoutEvent?: PayoutEventSummary | null
   fanTrust?: TrustScore | null
+  trackingLinkUuid?: string | null
+  trackingLinkSlug?: string | null
+  trackingLinkUrl?: string | null
 }
 
 export interface PayoutEventSummary {

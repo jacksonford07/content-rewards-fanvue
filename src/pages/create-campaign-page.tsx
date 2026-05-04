@@ -100,7 +100,7 @@ export function CreateCampaignPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const editing = Boolean(id)
-  const { refresh } = useAuth()
+  const { user, refresh } = useAuth()
   const createMutation = useCreateCampaign()
   const updateMutation = useUpdateCampaign()
   const [, setExisting] = useState<Campaign | undefined>()
@@ -126,6 +126,8 @@ export function CreateCampaignPage() {
     sourceUrl: "",
     platforms: [] as Platform[],
     rewardRate: "3.00",
+    ratePerSub: "5.00",
+    payoutType: "per_1k_views" as "per_1k_views" | "per_subscriber",
     totalBudget: "1000",
     minThreshold: "2000",
     maxPerClip: "",
@@ -159,6 +161,8 @@ export function CreateCampaignPage() {
         maxPerClip: c.maxPayoutPerClip ? c.maxPayoutPerClip.toString() : "",
         isPrivate: c.isPrivate === true,
         acceptedPayoutMethods: c.acceptedPayoutMethods ?? [],
+        payoutType: c.payoutType ?? "per_1k_views",
+        ratePerSub: (c.ratePerSub ?? 5).toString(),
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -237,13 +241,18 @@ export function CreateCampaignPage() {
         : state.requirementsUrl.trim().startsWith("http")
     if (step === 3) return state.sourceUrl.trim().startsWith("http")
     if (step === 4) return state.platforms.length > 0
-    if (step === 5)
+    if (step === 5) {
+      const rateOk =
+        state.payoutType === "per_subscriber"
+          ? parseFloat(state.ratePerSub) > 0
+          : parseFloat(state.rewardRate) > 0
       return (
-        parseFloat(state.rewardRate) > 0 &&
+        rateOk &&
         parseFloat(state.totalBudget) >= 100 &&
         parseFloat(state.minThreshold) >= 0 &&
         state.acceptedPayoutMethods.length > 0
       )
+    }
     return true
   }, [step, state])
 
@@ -281,6 +290,8 @@ export function CreateCampaignPage() {
       sourceThumbnailUrl: thumbUrl,
       allowedPlatforms: state.platforms,
       acceptedPayoutMethods: state.acceptedPayoutMethods,
+      payoutType: state.payoutType,
+      ratePerSub: parseFloat(state.ratePerSub) || 0,
       rewardRatePer1k: parseFloat(state.rewardRate) || 0,
       totalBudget: parseFloat(state.totalBudget) || 0,
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
@@ -317,6 +328,27 @@ export function CreateCampaignPage() {
 
   const handlePublish = async () => {
     if (!validateRewards()) return
+    // M4.2 — for per-sub campaigns, ensure the creator has granted the
+    // write:tracking_links scope. If not, redirect through the OAuth
+    // upgrade flow before persisting the campaign.
+    if (
+      state.payoutType === "per_subscriber" &&
+      !user?.fanvueScopes?.includes("write:tracking_links")
+    ) {
+      const apiUrl = import.meta.env.VITE_API_URL || ""
+      // Save a draft first so the campaign isn't lost during the OAuth bounce
+      try {
+        await saveCampaign("draft")
+      } catch {
+        // best effort
+      }
+      toast.message("Granting tracking-link permission…", {
+        description:
+          "We'll bounce you through Fanvue to grant 'tracking_links' scope, then come back here.",
+      })
+      window.location.href = `${apiUrl}/api/auth/fanvue?scope=tracking_links`
+      return
+    }
     setSaving(true)
     setSavingAction("publish")
     try {
