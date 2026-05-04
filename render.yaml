@@ -1,0 +1,119 @@
+# Render Blueprint — defines the cron jobs for content-rewards-fanvue.
+#
+# To apply: Render dashboard → Blueprints → New Blueprint Instance →
+# pick this repo. Render reads this file and provisions every service
+# below. Already-existing services keep running; new ones get created.
+#
+# CRON_SECRET inherits from the backend web service so it only needs to
+# be set in one place. If your backend service has a different name on
+# Render, update `fromService.name` in each block.
+
+services:
+  # M4.2 — flips per-sub campaigns past their end date to completed +
+  # rolls active subs to ready_to_pay.
+  - type: cron
+    name: sweep-campaign-end
+    runtime: node
+    schedule: "0 * * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/sweep-campaign-end',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # M4.2 — caps accrual at the campaign budget, freezes early when projected
+  # earnings would exceed.
+  - type: cron
+    name: check-budget-cap
+    runtime: node
+    schedule: "*/30 * * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/check-budget-cap',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # Auto-approve per-views submissions after 48h, OR auto-reject per-sub
+  # manual applications after 24h.
+  - type: cron
+    name: auto-approve
+    runtime: node
+    schedule: "*/15 * * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/auto-approve',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # Scrape view counts for active per-views submissions, feed pro-rata accrual.
+  - type: cron
+    name: track-views
+    runtime: node
+    schedule: "0 */6 * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/track-views',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # Send creator reminders when a submission's 30-day lock has passed.
+  - type: cron
+    name: lock-views
+    runtime: node
+    schedule: "0 * * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/lock-views',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # Auto-finalize submissions whose 30-day window closed without a creator
+  # entering verified views.
+  - type: cron
+    name: finalize-views
+    runtime: node
+    schedule: "0 */6 * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/finalize-views',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
+
+  # M4 — sync acquired-subscribers from Fanvue tracking links every 6h.
+  - type: cron
+    name: sync-subscribers
+    runtime: node
+    schedule: "0 */6 * * *"
+    buildCommand: ":"
+    startCommand: |
+      node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/sync-subscribers',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: content-rewards-fanvue
+          envVarKey: CRON_SECRET
