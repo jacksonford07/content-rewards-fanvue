@@ -113,6 +113,153 @@ export class SubmissionsService {
     private fanvueLinks: FanvueTrackingLinksService,
   ) {}
 
+  /**
+   * Per-subscriber apply flow (M4.2). Clipper joins a per-sub campaign without
+   * a clip artefact — they get a tracking link instead. Auto mode mints the
+   * link immediately and lands at `approved`; manual mode parks at `pending`
+   * with a 24h auto-reject deadline (cron flips it on timeout).
+   *
+   * Distinct entrypoint from `submit` so the per-views path is untouched.
+   */
+  async apply(
+    fanId: string,
+    campaignId: string,
+    opts?: { platform?: "tiktok" | "instagram" | "youtube" },
+  ) {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.payoutType !== "per_subscriber") {
+      throw new BadRequestException(
+        "This campaign uses per-views payouts. Submit a clip URL via /submissions instead.",
+      );
+    }
+    if (campaign.status !== "active")
+      throw new BadRequestException("Campaign is not active");
+
+    const availableBudget =
+      campaign.totalBudgetCents - campaign.budgetSpentCents;
+    if (availableBudget <= 0)
+      throw new BadRequestException("Campaign has no available budget");
+
+    if (campaign.endsAt && campaign.endsAt.getTime() <= Date.now()) {
+      throw new BadRequestException("This campaign has ended");
+    }
+
+    // One application per clipper per campaign — re-applying returns the
+    // existing submission so the UI can show the link/state idempotently.
+    const [existing] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, campaignId),
+          eq(schema.submissions.fanId, fanId),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      return this.serializeApplication(existing);
+    }
+
+    const [ban] = await this.db
+      .select()
+      .from(schema.campaignBans)
+      .where(
+        and(
+          eq(schema.campaignBans.campaignId, campaignId),
+          eq(schema.campaignBans.userId, fanId),
+        ),
+      )
+      .limit(1);
+    if (ban) throw new ForbiddenException("You are banned from this campaign");
+
+    if (campaign.acceptedPayoutMethods.length > 0) {
+      const clipperMethods = await this.db
+        .select({ method: schema.clipperPayoutMethods.method })
+        .from(schema.clipperPayoutMethods)
+        .where(eq(schema.clipperPayoutMethods.userId, fanId));
+      const clipperSet = new Set(clipperMethods.map((m) => m.method));
+      const overlap = campaign.acceptedPayoutMethods.some((m) =>
+        clipperSet.has(m),
+      );
+      if (!overlap) {
+        throw new BadRequestException(
+          `This creator pays in ${campaign.acceptedPayoutMethods.join(", ")}. Add one of these to your payout settings to apply.`,
+        );
+      }
+    }
+
+    const isAuto = campaign.applicationMode === "auto";
+    const now = new Date();
+    // D3 — auto_approve_at is overloaded: per-sub manual = auto-reject at 24h.
+    const autoApproveAt = isAuto
+      ? null
+      : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const [submission] = await this.db
+      .insert(schema.submissions)
+      .values({
+        campaignId,
+        fanId,
+        postUrl: null,
+        platform: opts?.platform ?? null,
+        status: isAuto ? "approved" : "pending",
+        creatorDecisionAt: isAuto ? now : null,
+        verificationStartedAt: isAuto ? now : null,
+        autoApproveAt,
+      })
+      .returning();
+
+    if (isAuto) {
+      await this.tryMintTrackingLink(submission!, campaign);
+    }
+
+    await this.notifications.create({
+      userId: campaign.creatorId,
+      type: "new_submission",
+      title: isAuto ? "New clipper joined" : "New application to review",
+      message: isAuto
+        ? `A clipper joined "${campaign.title}" and is now accruing.`
+        : `A clipper applied to "${campaign.title}". You have 24h to approve or deny.`,
+      actionUrl: isAuto
+        ? "/creator/inbox?tab=approved"
+        : "/creator/inbox?tab=pending",
+    });
+
+    // Re-read so we surface the minted link slug to the clipper.
+    const [fresh] = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(eq(schema.submissions.id, submission!.id))
+      .limit(1);
+    return this.serializeApplication(fresh!);
+  }
+
+  private serializeApplication(
+    s: typeof schema.submissions.$inferSelect,
+  ) {
+    return {
+      id: s.id,
+      campaignId: s.campaignId,
+      status: s.status,
+      autoApproveAt: s.autoApproveAt?.toISOString() ?? null,
+      createdAt: s.createdAt.toISOString(),
+      trackingLinkUuid: s.trackingLinkUuid,
+      trackingLinkSlug: s.trackingLinkSlug,
+      trackingLinkUrl: s.trackingLinkSlug
+        ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
+        : null,
+      lastAcquiredSubs: s.lastAcquiredSubs,
+      pendingEarnings: s.pendingEarningsCents
+        ? s.pendingEarningsCents / 100
+        : 0,
+    };
+  }
+
   async submit(
     fanId: string,
     data: { campaignId: string; postUrl: string; platform: string },
@@ -189,7 +336,7 @@ export class SubmissionsService {
     // AI content review runs in the background — it can take 10–20s once we
     // pull the video and ask Claude. We don't block the response; the
     // creator will see the verdict in the inbox as soon as it lands.
-    void this.runAiVerification(submission!.id, submission!.postUrl, campaign);
+    void this.runAiVerification(submission!.id, submission!.postUrl!, campaign);
 
     // Notify creator
     await this.notifications.create({
@@ -206,6 +353,7 @@ export class SubmissionsService {
   private async initialScrape(
     submission: typeof schema.submissions.$inferSelect,
   ) {
+    if (!submission.postUrl) return; // per-sub apply flow has no clip to scrape
     try {
       const now = new Date();
       const result = await this.scrapers.getViews(submission.postUrl);
@@ -806,8 +954,19 @@ export class SubmissionsService {
   async approve(id: string, creatorId: string) {
     const submission = await this.getOwnedSubmission(id, creatorId);
 
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, submission.campaignId))
+      .limit(1);
+
     const now = new Date();
-    const lockDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const isPerSub = campaign?.payoutType === "per_subscriber";
+    // Per-sub has no day-30 lock — accrual stops at campaign endsAt or when
+    // the budget-cap cron flips the campaign early.
+    const lockDate = isPerSub
+      ? null
+      : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     await this.db
       .update(schema.submissions)
@@ -816,35 +975,27 @@ export class SubmissionsService {
         creatorDecisionAt: now,
         verificationStartedAt: now,
         lockDate,
+        autoApproveAt: null,
         updatedAt: now,
       })
       .where(eq(schema.submissions.id, id));
 
-    // Notify clipper
-    const [campaign] = await this.db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, submission.campaignId))
-      .limit(1);
-
-    // M4.3 — mint a Fanvue tracking link for per-subscriber campaigns. Idempotent:
-    // re-approving a submission that already has a link is a no-op. Mint failures
-    // (auth, scope, rate limit) do not block the approval — they're logged and
-    // the link is retried later.
-    if (
-      campaign &&
-      campaign.payoutType === "per_subscriber" &&
-      !submission.trackingLinkUuid
-    ) {
+    // M4.3 / M4.2 — mint Fanvue tracking link on approve for per-sub campaigns.
+    // Idempotent: re-approving a submission that already has a link is a no-op.
+    // For auto-mode applications the link was minted on apply; this branch
+    // covers manual-mode approvals and per-views→per-sub edge cases.
+    if (campaign && isPerSub && !submission.trackingLinkUuid) {
       await this.tryMintTrackingLink(submission, campaign);
     }
 
     await this.notifications.create({
       userId: submission.fanId,
       type: "approved",
-      title: "Submission approved",
-      message: `Your clip for "${campaign?.title}" was approved. 30-day view verification started.`,
-      actionUrl: "/submissions?tab=approved",
+      title: isPerSub ? "Application approved" : "Submission approved",
+      message: isPerSub
+        ? `You're in on "${campaign?.title}". Your tracking link is ready to share.`
+        : `Your clip for "${campaign?.title}" was approved. 30-day view verification started.`,
+      actionUrl: isPerSub ? "/submissions" : "/submissions?tab=approved",
     });
 
     return { success: true };
@@ -883,8 +1034,10 @@ export class SubmissionsService {
       const link = await this.fanvueLinks.createLink({
         accessToken: creator.accessToken,
         name: `${clipper?.handle ?? "clipper"} · ${campaign.title}`,
+        // Per-sub apply flow may have no platform yet — fall back to "other".
         platform:
-          submission.platform as "tiktok" | "instagram" | "youtube",
+          (submission.platform as "tiktok" | "instagram" | "youtube" | null) ??
+          "other",
       });
       await this.db
         .update(schema.submissions)
@@ -959,6 +1112,29 @@ export class SubmissionsService {
         userId: submission.fanId,
       })
       .onConflictDoNothing();
+
+    // M4.2 D6 — banning a per-sub clipper revokes their tracking link so
+    // attribution stops accruing. Best-effort: ban must succeed even if
+    // Fanvue is rate-limited or the token was rotated.
+    if (submission.trackingLinkUuid) {
+      try {
+        const [creator] = await this.db
+          .select({ accessToken: schema.users.fanvueAccessToken })
+          .from(schema.users)
+          .where(eq(schema.users.id, creatorId))
+          .limit(1);
+        if (creator?.accessToken) {
+          await this.fanvueLinks.deleteLink({
+            accessToken: creator.accessToken,
+            uuid: submission.trackingLinkUuid,
+          });
+        }
+      } catch (err) {
+        this.logger.error(
+          `Failed to revoke tracking link ${submission.trackingLinkUuid} on ban: ${err}`,
+        );
+      }
+    }
 
     return { success: true };
   }
@@ -1304,6 +1480,7 @@ export class SubmissionsService {
         trackingLinkUrl: s.trackingLinkSlug
           ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
           : null,
+        lastAcquiredSubs: s.lastAcquiredSubs ?? 0,
       };
     });
   }

@@ -455,6 +455,8 @@ export class CampaignsService {
       acceptedPayoutMethods?: string[];
       payoutType?: "per_1k_views" | "per_subscriber";
       ratePerSub?: number;
+      applicationMode?: "auto" | "manual";
+      endsAt?: string;
     },
   ) {
     // v1.1: no escrow / wallet — campaigns publish directly to "active"
@@ -473,6 +475,20 @@ export class CampaignsService {
       }
     }
     const isPrivate = data.isPrivate === true;
+
+    // M4.2 — per-sub campaigns require an end date; default to +30d.
+    const isPerSub = data.payoutType === "per_subscriber";
+    let endsAt: Date | null = null;
+    if (data.endsAt) {
+      const parsed = new Date(data.endsAt);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException("Invalid endsAt date");
+      }
+      endsAt = parsed;
+    } else if (isPerSub) {
+      endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    }
+
     const [campaign] = await this.db
       .insert(schema.campaigns)
       .values({
@@ -490,6 +506,7 @@ export class CampaignsService {
           (data.acceptedPayoutMethods as schema.PayoutMethod[]) ?? [],
         payoutType: data.payoutType ?? "per_1k_views",
         ratePerSubCents: Math.round((data.ratePerSub ?? 0) * 100),
+        applicationMode: data.applicationMode ?? "auto",
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -500,10 +517,112 @@ export class CampaignsService {
         isPrivate,
         privateSlug: isPrivate ? generatePrivateSlug() : null,
         goesLiveAt: status === "active" ? new Date() : null,
+        endsAt,
       })
       .returning();
 
     return this.serializeSingle(campaign!);
+  }
+
+  /**
+   * M4.2 D5/E — creator-triggered campaign close.
+   *
+   * Flips an active per-sub campaign to `completed` and sweeps every still-
+   * accruing submission to `ready_to_pay`. Per-views campaigns ignore this:
+   * they have a 30-day verification window per submission and don't support
+   * an early settlement bulk-flip.
+   */
+  async closeCampaign(id: string, creatorId: string) {
+    const [campaign] = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, id))
+      .limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (campaign.creatorId !== creatorId) throw new ForbiddenException();
+    if (campaign.payoutType !== "per_subscriber") {
+      throw new BadRequestException(
+        "Only per-subscriber campaigns support manual close",
+      );
+    }
+    if (campaign.status !== "active") {
+      throw new BadRequestException(
+        `Cannot close a campaign in '${campaign.status}' status`,
+      );
+    }
+
+    return this.sweepToReadyToPay(id);
+  }
+
+  /**
+   * Shared by closeCampaign + cron (sweep-campaign-end / check-budget-cap):
+   * marks campaign completed and rolls active subs to ready_to_pay with the
+   * accrued amount becoming the payout. Idempotent — only flips subs that are
+   * still in an accruing state.
+   */
+  async sweepToReadyToPay(campaignId: string) {
+    const now = new Date();
+
+    const activeSubs = await this.db
+      .select()
+      .from(schema.submissions)
+      .where(
+        and(
+          eq(schema.submissions.campaignId, campaignId),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+        ),
+      );
+
+    let totalSettledCents = 0;
+    for (const sub of activeSubs) {
+      const payoutCents = sub.pendingEarningsCents;
+      if (sub.status === "pending") {
+        // Pending applications never accrued — drop them.
+        await this.db
+          .update(schema.submissions)
+          .set({
+            status: "rejected",
+            rejectionReason: "Campaign ended before approval",
+            updatedAt: now,
+          })
+          .where(eq(schema.submissions.id, sub.id));
+        continue;
+      }
+      await this.db
+        .update(schema.submissions)
+        .set({
+          status: "ready_to_pay",
+          payoutAmountCents: payoutCents,
+          updatedAt: now,
+        })
+        .where(eq(schema.submissions.id, sub.id));
+      totalSettledCents += payoutCents;
+    }
+
+    if (totalSettledCents > 0) {
+      await this.db
+        .update(schema.campaigns)
+        .set({
+          budgetSpentCents: sql`${schema.campaigns.budgetSpentCents} + ${totalSettledCents}`,
+          status: "completed",
+          updatedAt: now,
+        })
+        .where(eq(schema.campaigns.id, campaignId));
+    } else {
+      await this.db
+        .update(schema.campaigns)
+        .set({ status: "completed", updatedAt: now })
+        .where(eq(schema.campaigns.id, campaignId));
+    }
+
+    return {
+      settled: activeSubs.filter((s) => s.status !== "pending").length,
+      totalSettledCents,
+    };
   }
 
   async update(
@@ -524,6 +643,11 @@ export class CampaignsService {
       maxPayoutPerClip?: number;
       status?: string;
       isPrivate?: boolean;
+      payoutType?: "per_1k_views" | "per_subscriber";
+      ratePerSub?: number;
+      applicationMode?: "auto" | "manual";
+      endsAt?: string;
+      acceptedPayoutMethods?: string[];
     },
   ) {
     const [existing] = await this.db
@@ -587,7 +711,34 @@ export class CampaignsService {
           updateData.privateSlug = null;
         }
       }
+      if (data.payoutType !== undefined) {
+        updateData.payoutType = data.payoutType;
+      }
+      if (data.ratePerSub !== undefined) {
+        updateData.ratePerSubCents = Math.round(data.ratePerSub * 100);
+      }
+      if (data.applicationMode !== undefined) {
+        updateData.applicationMode = data.applicationMode;
+      }
+      if (data.endsAt !== undefined) {
+        if (data.endsAt === null || data.endsAt === "") {
+          updateData.endsAt = null;
+        } else {
+          const parsed = new Date(data.endsAt);
+          if (Number.isNaN(parsed.getTime())) {
+            throw new BadRequestException("Invalid endsAt date");
+          }
+          updateData.endsAt = parsed;
+        }
+      }
       if (data.status === "active") {
+        const targetType =
+          (updateData.payoutType as string | undefined) ?? existing.payoutType;
+        if (targetType === "per_subscriber" && !updateData.endsAt && !existing.endsAt) {
+          updateData.endsAt = new Date(
+            Date.now() + 30 * 24 * 60 * 60 * 1000,
+          );
+        }
         updateData.status = "active";
         if (!existing.goesLiveAt) updateData.goesLiveAt = new Date();
       }
@@ -853,6 +1004,7 @@ export class CampaignsService {
       allowedPlatforms: c.allowedPlatforms,
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
+      applicationMode: c.applicationMode,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
@@ -889,6 +1041,7 @@ export class CampaignsService {
       allowedPlatforms: c.allowedPlatforms,
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
+      applicationMode: c.applicationMode,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,

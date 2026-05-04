@@ -50,6 +50,20 @@ export class CronController {
     return this.cronService.syncSubscriberAttribution();
   }
 
+  @Public()
+  @Post("sweep-campaign-end")
+  sweepCampaignEnd(@Headers("x-cron-secret") secret: string) {
+    this.verifySecret(secret);
+    return this.cronService.sweepCampaignEnd();
+  }
+
+  @Public()
+  @Post("check-budget-cap")
+  checkBudgetCap(@Headers("x-cron-secret") secret: string) {
+    this.verifySecret(secret);
+    return this.cronService.checkBudgetCap();
+  }
+
   private verifySecret(secret: string) {
     const expected = this.config.get<string>("CRON_SECRET", "cron-secret");
     if (secret !== expected) {

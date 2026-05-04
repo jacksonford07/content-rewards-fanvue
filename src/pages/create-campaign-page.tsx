@@ -128,6 +128,8 @@ export function CreateCampaignPage() {
     rewardRate: "3.00",
     ratePerSub: "5.00",
     payoutType: "per_1k_views" as "per_1k_views" | "per_subscriber",
+    applicationMode: "auto" as "auto" | "manual",
+    endsAt: "",
     totalBudget: "1000",
     minThreshold: "2000",
     maxPerClip: "",
@@ -163,6 +165,8 @@ export function CreateCampaignPage() {
         acceptedPayoutMethods: c.acceptedPayoutMethods ?? [],
         payoutType: c.payoutType ?? "per_1k_views",
         ratePerSub: (c.ratePerSub ?? 5).toString(),
+        applicationMode: (c.applicationMode ?? "auto") as "auto" | "manual",
+        endsAt: c.endsAt ? c.endsAt.slice(0, 10) : "",
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -292,6 +296,14 @@ export function CreateCampaignPage() {
       acceptedPayoutMethods: state.acceptedPayoutMethods,
       payoutType: state.payoutType,
       ratePerSub: parseFloat(state.ratePerSub) || 0,
+      applicationMode:
+        state.payoutType === "per_subscriber"
+          ? state.applicationMode
+          : undefined,
+      endsAt:
+        state.payoutType === "per_subscriber" && state.endsAt
+          ? new Date(`${state.endsAt}T23:59:59Z`).toISOString()
+          : undefined,
       rewardRatePer1k: parseFloat(state.rewardRate) || 0,
       totalBudget: parseFloat(state.totalBudget) || 0,
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
@@ -673,6 +685,67 @@ export function CreateCampaignPage() {
                   </p>
                 )}
               </div>
+
+              {/* M4.2 — application mode + required end date for per-sub */}
+              {state.payoutType === "per_subscriber" && (
+                <>
+                  <div className="space-y-2">
+                    <Label>How clippers join</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          {
+                            v: "auto",
+                            label: "Auto-grant",
+                            hint: "Tracking link minted instantly on apply",
+                          },
+                          {
+                            v: "manual",
+                            label: "Approve each",
+                            hint: "24h to approve or deny — auto-rejects on timeout",
+                          },
+                        ] as const
+                      ).map((opt) => {
+                        const selected = state.applicationMode === opt.v
+                        return (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => update("applicationMode", opt.v)}
+                            className={cn(
+                              "rounded-lg border px-3 py-2 text-left transition-colors",
+                              selected
+                                ? "border-primary/60 bg-primary/10 text-primary"
+                                : "border-border/70 bg-background/50 hover:border-border",
+                            )}
+                          >
+                            <div className="text-sm font-medium">
+                              {opt.label}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">
+                              {opt.hint}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Campaign end date</Label>
+                    <Input
+                      type="date"
+                      value={state.endsAt}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => update("endsAt", e.target.value)}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Accrual stops at the end date. Defaults to 30 days from
+                      now if left blank.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 {state.payoutType === "per_1k_views" ? (

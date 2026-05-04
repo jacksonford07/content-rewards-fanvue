@@ -64,7 +64,12 @@ import {
   timeUntil,
 } from "@/lib/mock-data"
 import { useCampaign, useCampaignSourceStatus } from "@/queries/campaigns"
-import { useMySubmissions, useSubmitClip } from "@/queries/submissions"
+import {
+  useApplyToCampaign,
+  useMySubmissions,
+  useSubmitClip,
+} from "@/queries/submissions"
+import { PerSubClipperPanel } from "@/components/per-sub-clipper-panel"
 import { usePayoutSettings } from "@/queries/payout-methods"
 import { payoutMethodLabel } from "@/lib/payout-validators"
 import { TrustBadge } from "@/components/trust-badge"
@@ -96,6 +101,8 @@ export function CampaignDetailPage() {
 
   const submitMutation = useSubmitClip()
   const submitting = submitMutation.isPending
+  const applyMutation = useApplyToCampaign()
+  const applying = applyMutation.isPending
 
   // Auto-detect platform from URL
   const detectedPlatform: Platform | null = useMemo(() => {
@@ -337,9 +344,34 @@ export function CampaignDetailPage() {
     ? Math.min(100 - spentPct, Math.round((reserved / campaign.totalBudget) * 100))
     : 0
 
+  const isPerSub = campaign.payoutType === "per_subscriber"
   const payoutTiers = (() => {
+    if (isPerSub) {
+      const rate = campaign.ratePerSub
+      if (rate <= 0) return [] as { units: number; payout: number; isMax?: boolean }[]
+      const maxSinglePayout = Math.max(
+        0,
+        campaign.maxPayoutPerClip
+          ? Math.min(campaign.maxPayoutPerClip, budgetRemaining)
+          : budgetRemaining
+      )
+      const maxSubsRaw = maxSinglePayout / rate
+      if (maxSubsRaw < 1) return []
+      const roundStep = maxSubsRaw >= 1000 ? 100 : maxSubsRaw >= 100 ? 25 : maxSubsRaw >= 20 ? 5 : 1
+      const roundDown = (v: number) => Math.max(roundStep, Math.floor(v / roundStep) * roundStep)
+      const tier1 = roundDown(maxSubsRaw * 0.25)
+      const tier2 = roundDown(maxSubsRaw * 0.5)
+      const smaller = Array.from(new Set([tier1, tier2]))
+        .filter((v) => v < maxSubsRaw)
+        .sort((a, b) => a - b)
+        .map((units) => ({ units, payout: units * rate, isMax: false }))
+      return [
+        ...smaller,
+        { units: Math.round(maxSubsRaw), payout: maxSinglePayout, isMax: true },
+      ]
+    }
     const rate = campaign.rewardRatePer1k
-    if (rate <= 0) return [] as { views: number; payout: number; isMax?: boolean }[]
+    if (rate <= 0) return [] as { units: number; payout: number; isMax?: boolean }[]
     const maxSinglePayout = Math.max(
       0,
       campaign.maxPayoutPerClip
@@ -355,10 +387,10 @@ export function CampaignDetailPage() {
     const smaller = Array.from(new Set([tier1Views, tier2Views]))
       .filter((v) => v < maxViewsRaw)
       .sort((a, b) => a - b)
-      .map((views) => ({ views, payout: (views / 1000) * rate, isMax: false }))
+      .map((units) => ({ units, payout: (units / 1000) * rate, isMax: false }))
     return [
       ...smaller,
-      { views: Math.round(maxViewsRaw), payout: maxSinglePayout, isMax: true },
+      { units: Math.round(maxViewsRaw), payout: maxSinglePayout, isMax: true },
     ]
   })()
 
@@ -897,6 +929,41 @@ export function CampaignDetailPage() {
                     </p>
                   </div>
                 )
+              ) : isPerSub ? (
+                <PerSubClipperPanel
+                  campaign={campaign}
+                  myClips={myClips}
+                  hasMethodOverlap={hasMethodOverlap}
+                  missingMethodsHint={missingMethodsHint}
+                  isBannedFromCampaign={isBannedFromCampaign}
+                  budgetRemaining={budgetRemaining}
+                  applying={applying}
+                  onApply={async () => {
+                    if (!campaign) return
+                    try {
+                      await applyMutation.mutateAsync({
+                        campaignId: campaign.id,
+                      })
+                      toast.success(
+                        campaign.applicationMode === "manual"
+                          ? "Application submitted"
+                          : "You're in!",
+                        {
+                          description:
+                            campaign.applicationMode === "manual"
+                              ? "The creator has 24 hours to approve."
+                              : "Your tracking link is ready below — share it to start accruing.",
+                        },
+                      )
+                    } catch (err) {
+                      const e = err as { response?: { data?: { message?: string } } }
+                      toast.error("Application failed", {
+                        description:
+                          e.response?.data?.message ?? "Try again in a moment.",
+                      })
+                    }
+                  }}
+                />
               ) : (
                 <>
                   {!hasMethodOverlap && missingMethodsHint && (
@@ -1006,14 +1073,14 @@ export function CampaignDetailPage() {
               <p className="mb-3 text-[11px] text-muted-foreground">
                 Based on {formatCurrency(budgetRemaining)} remaining
                 {campaign.maxPayoutPerClip
-                  ? ` · ${formatCurrency(campaign.maxPayoutPerClip)} max per clip`
+                  ? ` · ${formatCurrency(campaign.maxPayoutPerClip)} max per ${isPerSub ? "clipper" : "clip"}`
                   : ""}
               </p>
               <div className="space-y-2 text-sm">
                 {payoutTiers.map((t) => (
-                  <div key={t.views} className="flex items-center justify-between">
+                  <div key={t.units} className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      {formatCompactNumber(t.views)} views
+                      {formatCompactNumber(t.units)} {isPerSub ? "subs" : "views"}
                       {t.isMax && (
                         <span className="ml-1.5 text-[10px] uppercase tracking-wide text-primary">
                           max

@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
+import { CampaignsService } from "../campaigns/campaigns.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { SubmissionsService } from "../submissions/submissions.service.js";
@@ -21,6 +22,7 @@ export class CronService {
     private scrapers: ScrapersService,
     private submissions: SubmissionsService,
     private fanvueLinks: FanvueTrackingLinksService,
+    private campaigns: CampaignsService,
   ) {}
 
   /**
@@ -160,9 +162,9 @@ export class CronService {
         ),
       );
 
-    let count = 0;
+    let approved = 0;
+    let rejected = 0;
     for (const sub of pending) {
-      // Check if campaign has available budget
       const [campaign] = await this.db
         .select()
         .from(schema.campaigns)
@@ -170,13 +172,36 @@ export class CronService {
         .limit(1);
 
       if (!campaign) continue;
-
-      // Skip paused/completed campaigns — don't auto-approve
       if (campaign.status !== "active") continue;
 
       const available =
         campaign.totalBudgetCents - campaign.budgetSpentCents;
-      if (available <= 0) continue; // Skip — no budget left
+      if (available <= 0) continue;
+
+      // M4.2 D3 — auto_approve_at semantics depend on campaign type:
+      //  - per-views, pending: auto-approve at 48h
+      //  - per-sub manual, pending: auto-REJECT at 24h
+      //  - per-sub auto: never lands here (status starts as approved)
+      if (campaign.payoutType === "per_subscriber") {
+        await this.db
+          .update(schema.submissions)
+          .set({
+            status: "rejected",
+            rejectionReason: "Auto-rejected: creator did not respond within 24h",
+            creatorDecisionAt: now,
+            updatedAt: now,
+          })
+          .where(eq(schema.submissions.id, sub.id));
+        await this.notifications.create({
+          userId: sub.fanId,
+          type: "rejected",
+          title: "Application timed out",
+          message: `Your application to "${campaign.title}" was auto-rejected after 24h with no creator response.`,
+          actionUrl: "/submissions?tab=rejected",
+        });
+        rejected++;
+        continue;
+      }
 
       const lockDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       await this.db
@@ -198,10 +223,10 @@ export class CronService {
         actionUrl: "/submissions",
       });
 
-      count++;
+      approved++;
     }
 
-    return { autoApproved: count };
+    return { autoApproved: approved, autoRejected: rejected };
   }
 
   async sendViewsReadyReminders() {
@@ -258,6 +283,8 @@ export class CronService {
           ]),
           isNull(schema.submissions.postDeletedAt),
           isNull(schema.submissions.viewsAtDay30),
+          // Per-sub apply submissions have no clip URL — skip scraping them.
+          sql`${schema.submissions.postUrl} IS NOT NULL`,
         ),
       );
 
@@ -290,7 +317,7 @@ export class CronService {
       }
 
       try {
-        const result = await this.scrapers.getViews(sub.postUrl);
+        const result = await this.scrapers.getViews(sub.postUrl!);
 
         await this.db.insert(schema.submissionViewSnapshots).values({
           submissionId: sub.id,
@@ -384,5 +411,96 @@ export class CronService {
 
   async finalizeViews() {
     return this.submissions.autoFinalizeDueSubmissions();
+  }
+
+  /**
+   * M4.2 D5 — sweep per-sub campaigns whose `ends_at` has passed.
+   *
+   * Hourly cron. Flips active per-sub campaigns past their end date to
+   * `completed` and rolls every still-accruing submission to `ready_to_pay`
+   * (with the pending earnings frozen as the payout).
+   */
+  async sweepCampaignEnd() {
+    const now = new Date();
+    const due = await this.db
+      .select()
+      .from(schema.campaigns)
+      .where(
+        and(
+          eq(schema.campaigns.payoutType, "per_subscriber"),
+          eq(schema.campaigns.status, "active"),
+          isNotNull(schema.campaigns.endsAt),
+          lt(schema.campaigns.endsAt, now),
+        ),
+      );
+
+    let swept = 0;
+    let totalSettledCents = 0;
+    for (const c of due) {
+      try {
+        const result = await this.campaigns.sweepToReadyToPay(c.id);
+        swept++;
+        totalSettledCents += result.totalSettledCents;
+      } catch (err) {
+        this.logger.error(
+          `Failed to sweep campaign ${c.id} on ends_at: ${err}`,
+        );
+      }
+    }
+    return { swept, totalSettledCents };
+  }
+
+  /**
+   * M4.2 D5 — budget-cap watchdog. Every 30 min, sums pending earnings on
+   * each active per-sub campaign; if the projected total exceeds the budget,
+   * flips the campaign early so we never accrue past the creator's spend cap.
+   */
+  async checkBudgetCap() {
+    const rows = await this.db
+      .select({
+        campaignId: schema.campaigns.id,
+        totalBudgetCents: schema.campaigns.totalBudgetCents,
+        budgetSpentCents: schema.campaigns.budgetSpentCents,
+        pendingTotalCents: sql<number>`coalesce(sum(${schema.submissions.pendingEarningsCents}), 0)::int`,
+      })
+      .from(schema.campaigns)
+      .leftJoin(
+        schema.submissions,
+        and(
+          eq(schema.submissions.campaignId, schema.campaigns.id),
+          inArray(schema.submissions.status, [
+            "pending",
+            "approved",
+            "auto_approved",
+          ]),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.campaigns.payoutType, "per_subscriber"),
+          eq(schema.campaigns.status, "active"),
+        ),
+      )
+      .groupBy(schema.campaigns.id);
+
+    let frozen = 0;
+    let totalSettledCents = 0;
+    for (const r of rows) {
+      const projected = r.budgetSpentCents + r.pendingTotalCents;
+      if (projected < r.totalBudgetCents) continue;
+      try {
+        const result = await this.campaigns.sweepToReadyToPay(r.campaignId);
+        frozen++;
+        totalSettledCents += result.totalSettledCents;
+        this.logger.log(
+          `Froze campaign ${r.campaignId} — projected ${projected}c >= budget ${r.totalBudgetCents}c`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to freeze campaign ${r.campaignId} on budget cap: ${err}`,
+        );
+      }
+    }
+    return { frozen, totalSettledCents };
   }
 }

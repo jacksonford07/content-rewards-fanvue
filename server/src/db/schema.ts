@@ -114,6 +114,16 @@ export const campaigns = pgTable("campaigns", {
     .notNull(),
   // M4: cents-per-sub rate when payoutType = per_subscriber.
   ratePerSubCents: integer("rate_per_sub_cents").default(0).notNull(),
+  // M4.2 (per-sub apply flow): how clippers join a per-subscriber campaign.
+  // - auto: tracking link minted on apply, status jumps straight to approved.
+  // - manual: clipper waits in pending up to 24h while creator approves/denies;
+  //   timeout auto-rejects (see auto_approve_at semantics in submissions).
+  // Ignored for per_1k_views campaigns.
+  applicationMode: text("application_mode", {
+    enum: ["auto", "manual"],
+  })
+    .default("auto")
+    .notNull(),
   status: text("status", {
     enum: ["draft", "pending_budget", "active", "paused", "completed"],
   })
@@ -145,10 +155,12 @@ export const submissions = pgTable("submissions", {
   fanId: uuid("fan_id")
     .notNull()
     .references(() => users.id),
-  postUrl: text("post_url").notNull(),
+  // Per-views requires both at the API layer; per-sub apply flow has no clip
+  // artefact, so these are nullable in the DB. M4.2.
+  postUrl: text("post_url"),
   platform: text("platform", {
     enum: ["tiktok", "instagram", "youtube"],
-  }).notNull(),
+  }),
   aiReviewResult: text("ai_review_result", {
     enum: ["clean", "flagged"],
   }),

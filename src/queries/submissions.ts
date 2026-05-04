@@ -139,6 +139,23 @@ export function useInboxStats(
   })
 }
 
+export function useSubmissionsByCampaign(
+  campaignId: string | undefined,
+  options?: TQueryOptions<Submission[]>,
+) {
+  return useQuery({
+    queryKey: [QK.submissions.byCampaign, campaignId] as const,
+    queryFn: async () => {
+      const res = await api.get<Submission[]>(
+        `/submissions/campaign/${campaignId}`,
+      )
+      return res.data
+    },
+    enabled: !!campaignId,
+    ...options,
+  })
+}
+
 function invalidateSubmissionFamily(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: [QK.submissions.mine] })
   qc.invalidateQueries({ queryKey: [QK.submissions.inbox] })
@@ -164,6 +181,64 @@ export function useSubmitClip(
     onSuccess: (...args) => {
       invalidateSubmissionFamily(qc)
       qc.invalidateQueries({ queryKey: [QK.campaigns.list] })
+      qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export interface CampaignApplication {
+  id: string
+  campaignId: string
+  status: string
+  autoApproveAt: string | null
+  createdAt: string
+  trackingLinkUuid: string | null
+  trackingLinkSlug: string | null
+  trackingLinkUrl: string | null
+  lastAcquiredSubs: number
+  pendingEarnings: number
+}
+
+export function useApplyToCampaign(
+  options?: TMutationOptions<
+    CampaignApplication,
+    { campaignId: string; platform?: "tiktok" | "instagram" | "youtube" }
+  >,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ campaignId, platform }) => {
+      const res = await api.post<CampaignApplication>(
+        `/campaigns/${campaignId}/apply`,
+        platform ? { platform } : {},
+      )
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      qc.invalidateQueries({ queryKey: [QK.campaigns.list] })
+      qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
+export function useCloseCampaign(
+  options?: TMutationOptions<unknown, string>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.post(`/campaigns/${id}/close`)
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      qc.invalidateQueries({ queryKey: [QK.campaigns.list] })
+      qc.invalidateQueries({ queryKey: [QK.campaigns.mine] })
       qc.invalidateQueries({ queryKey: [QK.campaigns.byId] })
       options?.onSuccess?.(...args)
     },

@@ -74,6 +74,7 @@ export interface Campaign {
   acceptedPayoutMethods: PayoutMethod[]
   payoutType: "per_1k_views" | "per_subscriber"
   ratePerSub: number
+  applicationMode?: "auto" | "manual"
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -93,9 +94,9 @@ export interface Submission {
   fanHandle: string
   fanAvatarUrl: string
   fanFollowers: number
-  postUrl: string
+  postUrl: string | null
   thumbnailUrl: string
-  platform: Platform
+  platform: Platform | null
   submittedAt: string
   status: SubmissionStatus
   viewsAtDay30?: number
@@ -123,6 +124,7 @@ export interface Submission {
   trackingLinkUuid?: string | null
   trackingLinkSlug?: string | null
   trackingLinkUrl?: string | null
+  lastAcquiredSubs?: number
 }
 
 export interface PayoutEventSummary {

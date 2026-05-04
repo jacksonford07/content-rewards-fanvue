@@ -11,10 +11,14 @@ import {
 } from "@nestjs/common";
 import { Public } from "../auth/public.decorator.js";
 import { CampaignsService } from "./campaigns.service.js";
+import { SubmissionsService } from "../submissions/submissions.service.js";
 
 @Controller("campaigns")
 export class CampaignsController {
-  constructor(private campaignsService: CampaignsService) {}
+  constructor(
+    private campaignsService: CampaignsService,
+    private submissionsService: SubmissionsService,
+  ) {}
 
   @Get("mine")
   mine(
@@ -120,9 +124,25 @@ export class CampaignsController {
       acceptedPayoutMethods?: string[];
       payoutType?: "per_1k_views" | "per_subscriber";
       ratePerSub?: number;
+      applicationMode?: "auto" | "manual";
+      endsAt?: string;
     },
   ) {
     return this.campaignsService.create(req.user.id, body);
+  }
+
+  @Post(":id/apply")
+  apply(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+    @Body() body: { platform?: "tiktok" | "instagram" | "youtube" } = {},
+  ) {
+    return this.submissionsService.apply(req.user.id, id, body);
+  }
+
+  @Post(":id/close")
+  close(@Param("id") id: string, @Req() req: { user: { id: string } }) {
+    return this.campaignsService.closeCampaign(id, req.user.id);
   }
 
   @Put(":id")
