@@ -17,11 +17,24 @@ export class AuthController {
 
   @Public()
   @Get("fanvue")
-  fanvueRedirect(@Req() req: Request, @Res() res: Response) {
+  fanvueRedirect(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query("scope") extraScopeParam?: string,
+  ) {
     // Fanvue OAuth app is registered with /auth/fanvue/callback (no /api prefix)
     const redirectUri = `${req.protocol}://${req.get("host")}/auth/fanvue/callback`;
     this.logger.log(`[fanvue] Start OAuth → redirect_uri="${redirectUri}"`);
-    const url = this.fanvueOAuth.generateAuthUrl(redirectUri);
+
+    // M4.2 — `?scope=tracking_links` upgrades the OAuth scope set so the
+    // creator can mint per-clipper tracking links. Frontend dispatches this
+    // when a per-subscriber campaign create attempt finds the scope missing.
+    const extraScopes: string[] = [];
+    if (extraScopeParam === "tracking_links") {
+      extraScopes.push("read:tracking_links", "write:tracking_links");
+    }
+
+    const url = this.fanvueOAuth.generateAuthUrl(redirectUri, extraScopes);
     this.logger.log(`[fanvue] Redirecting to Fanvue auth URL`);
     res.redirect(url);
   }

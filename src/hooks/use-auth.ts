@@ -12,6 +12,7 @@ export interface AuthUser {
   role: string
 
   isAdmin?: boolean
+  fanvueScopes?: string[]
 
   createdAt: string
 }

@@ -43,6 +43,13 @@ export class CronController {
     return this.cronService.finalizeViews();
   }
 
+  @Public()
+  @Post("sync-subscribers")
+  syncSubscribers(@Headers("x-cron-secret") secret: string) {
+    this.verifySecret(secret);
+    return this.cronService.syncSubscriberAttribution();
+  }
+
   private verifySecret(secret: string) {
     const expected = this.config.get<string>("CRON_SECRET", "cron-secret");
     if (secret !== expected) {
