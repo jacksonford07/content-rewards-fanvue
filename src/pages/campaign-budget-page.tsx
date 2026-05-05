@@ -319,7 +319,7 @@ export function CampaignBudgetPage() {
           {grouped.accruing.length > 0 && (
             <ClipperSection
               title="Accruing"
-              hint="Sub deltas hit every 6h via the attribution cron."
+              hint="Sub + click deltas land every 30 min via the attribution cron."
               icon={<Lightning className="size-4" />}
               rows={grouped.accruing}
             />
@@ -443,6 +443,10 @@ function ClipperSection({
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-4">
+                <Stat
+                  label="Clicks"
+                  value={(s.lastClicks ?? 0).toLocaleString()}
+                />
                 <Stat
                   label="Subs"
                   value={(s.lastAcquiredSubs ?? 0).toLocaleString()}

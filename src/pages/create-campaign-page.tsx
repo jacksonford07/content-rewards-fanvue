@@ -135,6 +135,7 @@ export function CreateCampaignPage() {
     payoutType: "per_1k_views" as "per_1k_views" | "per_subscriber",
     applicationMode: "auto" as "auto" | "manual",
     endsAt: "",
+    trafficRules: "",
     totalBudget: "1000",
     minThreshold: "2000",
     maxPerClip: "",
@@ -174,6 +175,7 @@ export function CreateCampaignPage() {
         ratePerSub: (c.ratePerSub ?? 5).toString(),
         applicationMode: (c.applicationMode ?? "auto") as "auto" | "manual",
         endsAt: c.endsAt ? c.endsAt.slice(0, 10) : "",
+        trafficRules: c.trafficRules ?? "",
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -310,6 +312,10 @@ export function CreateCampaignPage() {
       endsAt:
         state.payoutType === "per_subscriber" && state.endsAt
           ? new Date(`${state.endsAt}T23:59:59Z`).toISOString()
+          : undefined,
+      trafficRules:
+        state.payoutType === "per_subscriber" && state.trafficRules.trim()
+          ? state.trafficRules.trim()
           : undefined,
       rewardRatePer1k: parseFloat(state.rewardRate) || 0,
       totalBudget: parseFloat(state.totalBudget) || 0,
@@ -761,6 +767,25 @@ export function CreateCampaignPage() {
                     <p className="text-[11px] text-muted-foreground">
                       Accrual stops at the end date. Defaults to 30 days from
                       now if left blank.
+                    </p>
+                  </div>
+
+                  {/* v1.2 M2 — traffic rules per campaign */}
+                  <div className="space-y-2">
+                    <Label>Traffic rules (optional)</Label>
+                    <Textarea
+                      rows={5}
+                      placeholder={
+                        "e.g. No incentivised traffic, paid ads, or bot networks. Promote on your own audience only."
+                      }
+                      value={state.trafficRules}
+                      onChange={(e) =>
+                        update("trafficRules", e.target.value)
+                      }
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Surfaced to promoters in their workspace. Plain text;
+                      newlines preserved.
                     </p>
                   </div>
                 </>
