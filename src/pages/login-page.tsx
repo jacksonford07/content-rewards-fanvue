@@ -76,8 +76,8 @@ export function LoginPage() {
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               Fund campaigns, upload source videos, and let creators worldwide
-              spread your content as short-form clips on TikTok, Instagram
-              Reels, and YouTube.
+              spread your content as short-form clips on TikTok and Instagram
+              Reels.
             </p>
           </div>
 
@@ -100,7 +100,7 @@ export function LoginPage() {
             <FeatureRow
               icon={<Lightning className="size-5" weight="fill" />}
               title="Multi-platform reach"
-              description="Clips posted to TikTok, Instagram Reels, and YouTube."
+              description="Clips posted to TikTok and Instagram Reels."
             />
           </div>
         </div>

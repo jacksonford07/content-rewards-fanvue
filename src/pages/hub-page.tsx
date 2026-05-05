@@ -44,7 +44,6 @@ type SortKey = "newest" | "highest_rate" | "most_popular";
 const platformOptions: { value: Platform; label: string }[] = [
   { value: "tiktok", label: "TikTok" },
   { value: "instagram", label: "Instagram Reels" },
-  { value: "youtube", label: "YouTube" },
 ];
 
 export function HubPage() {

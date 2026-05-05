@@ -616,7 +616,7 @@ export function CreateCampaignPage() {
                 Select all platforms where clippers can post
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
-                {(["tiktok", "instagram", "youtube"] as Platform[]).map((p) => {
+                {(["tiktok", "instagram"] as Platform[]).map((p) => {
                   const selected = state.platforms.includes(p)
                   return (
                     <button
