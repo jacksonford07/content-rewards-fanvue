@@ -1,6 +1,6 @@
 import type { PayoutMethod } from "@/lib/payout-validators"
 
-export type Platform = "tiktok" | "instagram" | "youtube"
+export type Platform = "tiktok" | "instagram" | "youtube" | "reddit" | "x"
 
 export type CampaignStatus =
   | "draft"
