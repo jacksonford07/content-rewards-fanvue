@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PlatformIcon } from "@/components/platform-icon"
+import { CampaignTypeBadge } from "@/components/campaign-type-badge"
 import {
   formatCompactNumber,
   formatCurrency,
@@ -566,6 +567,9 @@ export function CampaignDetailPage() {
           {/* Title + status */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
+              <div className="mb-1.5">
+                <CampaignTypeBadge payoutType={campaign.payoutType} size="md" />
+              </div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
                   {campaign.title}
