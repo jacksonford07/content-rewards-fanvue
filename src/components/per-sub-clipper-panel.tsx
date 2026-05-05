@@ -18,6 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { track } from "@/lib/analytics"
 import { formatCurrency } from "@/lib/mock-data"
 import type { Campaign, Submission } from "@/lib/types"
 
@@ -93,6 +94,11 @@ export function PerSubClipperPanel({
                   )
                   setCopied(true)
                   toast.success("Link copied")
+                  // v1.2 M4 — PRD §S5 event
+                  track("tracking_link_copied", {
+                    submission_id: application.id,
+                    campaign_id: application.campaignId,
+                  })
                   setTimeout(() => setCopied(false), 1500)
                 }}
               >
