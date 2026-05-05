@@ -72,20 +72,20 @@ export function LoginPage() {
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">
               Turn your content into a{" "}
-              <span className="text-gradient">clipping marketplace</span>
+              <span className="text-gradient">growth marketplace</span>
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              Fund campaigns, upload source videos, and let creators worldwide
-              spread your content as short-form clips on TikTok and Instagram
-              Reels.
+              Fund clip campaigns to spread short-form content across TikTok
+              and Instagram Reels, or run subscriber campaigns where promoters
+              earn per acquired Fanvue sub via tracking links.
             </p>
           </div>
 
           <div className="space-y-5">
             <FeatureRow
               icon={<CurrencyDollar className="size-5" weight="fill" />}
-              title="Performance-based payouts"
-              description="Pay per 1,000 verified views — budget stays in escrow until results land."
+              title="Two performance-based modes"
+              description="Pay per 1,000 verified views, or per acquired subscriber via Fanvue tracking links."
             />
             <FeatureRow
               icon={<Users className="size-5" weight="fill" />}
@@ -100,7 +100,7 @@ export function LoginPage() {
             <FeatureRow
               icon={<Lightning className="size-5" weight="fill" />}
               title="Multi-platform reach"
-              description="Clips posted to TikTok and Instagram Reels."
+              description="Clips on TikTok + Instagram Reels; subscriber links shareable on Reddit, X, and beyond."
             />
           </div>
         </div>

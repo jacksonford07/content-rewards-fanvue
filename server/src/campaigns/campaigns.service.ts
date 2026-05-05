@@ -82,6 +82,7 @@ export class CampaignsService {
     viewerId?: string;
     page?: number;
     limit?: number;
+    payoutType?: "per_1k_views" | "per_subscriber";
   }) {
     const page = Math.max(1, filters.page ?? 1);
     const limit = Math.min(100, Math.max(1, filters.limit ?? 12));
@@ -137,6 +138,10 @@ export class CampaignsService {
 
     if (filters.search) {
       conditions.push(ilike(schema.campaigns.title, `%${filters.search}%`));
+    }
+
+    if (filters.payoutType) {
+      conditions.push(eq(schema.campaigns.payoutType, filters.payoutType));
     }
 
     // M3.3 — default sort by creator trust descending. Tiebreakers:
