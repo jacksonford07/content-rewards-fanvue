@@ -462,6 +462,7 @@ export class CampaignsService {
       ratePerSub?: number;
       applicationMode?: "auto" | "manual";
       endsAt?: string;
+      trafficRules?: string;
     },
   ) {
     // v1.1: no escrow / wallet — campaigns publish directly to "active"
@@ -512,6 +513,7 @@ export class CampaignsService {
         payoutType: data.payoutType ?? "per_1k_views",
         ratePerSubCents: Math.round((data.ratePerSub ?? 0) * 100),
         applicationMode: data.applicationMode ?? "auto",
+        trafficRules: data.trafficRules ?? null,
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -653,6 +655,7 @@ export class CampaignsService {
       applicationMode?: "auto" | "manual";
       endsAt?: string;
       acceptedPayoutMethods?: string[];
+      trafficRules?: string | null;
     },
   ) {
     const [existing] = await this.db
@@ -724,6 +727,12 @@ export class CampaignsService {
       }
       if (data.applicationMode !== undefined) {
         updateData.applicationMode = data.applicationMode;
+      }
+      if (data.trafficRules !== undefined) {
+        updateData.trafficRules =
+          data.trafficRules === null || data.trafficRules === ""
+            ? null
+            : data.trafficRules;
       }
       if (data.endsAt !== undefined) {
         if (data.endsAt === null || data.endsAt === "") {
@@ -1010,6 +1019,7 @@ export class CampaignsService {
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
+      trafficRules: c.trafficRules,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
@@ -1047,6 +1057,7 @@ export class CampaignsService {
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
+      trafficRules: c.trafficRules,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,

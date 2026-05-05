@@ -106,10 +106,16 @@ export class CronService {
             const link = linksByUuid.get(sub.trackingLinkUuid);
             if (!link) continue;
             const acquired = Math.floor(link.engagement.acquiredSubscribers);
-            const delta = Math.max(0, acquired - sub.lastAcquiredSubs);
-            if (delta === 0) continue;
+            // v1.2 M2.2 — also snapshot click count. Clicks do not accrue
+            // earnings on their own (per-sub rate is on acquired subs);
+            // we just need the snapshot for promoter workspace + roster
+            // delta display.
+            const clicks = Math.max(0, Math.floor(link.clicks ?? 0));
+            const subDelta = Math.max(0, acquired - sub.lastAcquiredSubs);
+            const clickDelta = Math.max(0, clicks - sub.lastClicks);
+            if (subDelta === 0 && clickDelta === 0) continue;
             const earnedCents = Math.round(
-              delta * group.campaign.ratePerSubCents,
+              subDelta * group.campaign.ratePerSubCents,
             );
             // Cap by remaining budget — pro-rata pool model.
             const remainingCents = Math.max(
@@ -122,6 +128,7 @@ export class CronService {
               .update(schema.submissions)
               .set({
                 lastAcquiredSubs: acquired,
+                lastClicks: clicks,
                 pendingEarningsCents: sql`${schema.submissions.pendingEarningsCents} + ${creditCents}`,
                 updatedAt: new Date(),
               })

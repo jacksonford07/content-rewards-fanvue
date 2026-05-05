@@ -3,16 +3,20 @@ import { Link } from "react-router-dom"
 import {
   CheckCircle,
   Copy,
+  CursorClick,
+  CurrencyDollar,
   Hourglass,
   Info,
   LinkSimple,
   Prohibit,
+  Scroll,
   Users,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { formatCurrency } from "@/lib/mock-data"
 import type { Campaign, Submission } from "@/lib/types"
@@ -43,6 +47,10 @@ export function PerSubClipperPanel({
 }: Props) {
   const application = myClips[0]
   const [copied, setCopied] = useState(false)
+  // v1.2 M2.11 — pre-apply anti-bot acknowledgement. Page-local: not
+  // persisted on the submission yet. If we need an audit trail later,
+  // store as `submissions.acknowledged_anti_bot_at` on apply.
+  const [acknowledgedAntiBot, setAcknowledgedAntiBot] = useState(false)
 
   const ended =
     campaign.status === "completed" ||
@@ -111,27 +119,53 @@ export function PerSubClipperPanel({
           </Alert>
         ) : null}
 
-        <div className="grid grid-cols-2 gap-2">
+        {/* v1.2 M2.4 + M2.6 — three-card stat row: clicks, acquired subs,
+            estimated earnings. "subs" replaces "views" labelling per
+            sync (M2.6). */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <CursorClick className="size-3" weight="bold" />
+              Clicks
+            </div>
+            <p className="mt-1 text-lg font-semibold tabular-nums">
+              {(application.lastClicks ?? 0).toLocaleString()}
+            </p>
+          </div>
           <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
             <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
               <Users className="size-3" weight="bold" />
               Subs acquired
             </div>
             <p className="mt-1 text-lg font-semibold tabular-nums">
-              {application.lastViewCount?.toLocaleString() ??
-                application.viewsAtDay30?.toLocaleString() ??
-                "0"}
+              {(application.lastAcquiredSubs ?? 0).toLocaleString()}
             </p>
           </div>
           <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Pending earnings
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <CurrencyDollar className="size-3" weight="bold" />
+              Earnings
             </div>
             <p className="mt-1 text-lg font-semibold tabular-nums text-primary">
               {formatCurrency(application.pendingEarnings ?? 0)}
             </p>
           </div>
         </div>
+
+        {/* v1.2 M2.4 — traffic rules. Plain whitespace-preserving render
+            (no markdown lib in the bundle). Creators set this on campaign
+            create / edit; falls through to nothing if blank. */}
+        {campaign.trafficRules ? (
+          <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              <Scroll className="size-3.5" weight="bold" />
+              Traffic rules
+            </div>
+            <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-foreground/90">
+              {campaign.trafficRules}
+            </p>
+          </div>
+        ) : null}
 
         <p className="text-center text-[11px] text-muted-foreground">
           Settles {campaign.endsAt
@@ -145,6 +179,21 @@ export function PerSubClipperPanel({
 
   return (
     <>
+      {/* v1.2 M2.11 — anti-bot acknowledgement gate. Required to apply.
+          Pure UX gate; not persisted on the submission record yet. */}
+      <label className="mt-6 flex cursor-pointer items-start gap-2.5 rounded-md border border-border/60 bg-muted/20 p-3 text-xs leading-relaxed">
+        <Checkbox
+          checked={acknowledgedAntiBot}
+          onCheckedChange={(v) => setAcknowledgedAntiBot(v === true)}
+          className="mt-0.5"
+        />
+        <span>
+          I won't drive this campaign with bots, click farms, or other
+          artificial traffic. I understand violations may result in losing
+          accrued earnings and being banned from this campaign and the
+          platform.
+        </span>
+      </label>
       {!hasMethodOverlap && missingMethodsHint && (
         <Alert className="mt-6 border-warning/40 bg-warning/5">
           <Info className="size-4 text-warning" />
@@ -163,9 +212,9 @@ export function PerSubClipperPanel({
         </Alert>
       )}
       <Button
-        className="mt-6 w-full"
+        className="mt-3 w-full"
         size="lg"
-        disabled={!canApply || applying}
+        disabled={!canApply || applying || !acknowledgedAntiBot}
         onClick={onApply}
       >
         {isBannedFromCampaign ? (
