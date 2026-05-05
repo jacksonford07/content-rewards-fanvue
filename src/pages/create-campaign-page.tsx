@@ -349,11 +349,18 @@ export function CreateCampaignPage() {
     ) {
       const apiUrl = import.meta.env.VITE_API_URL || ""
       // Save a draft first so the campaign isn't lost during the OAuth bounce
+      let draftId: string | null = null
       try {
-        await saveCampaign("draft")
+        draftId = (await saveCampaign("draft")) ?? null
       } catch {
         // best effort
       }
+      // M0.3: tell the auth callback where to send the user after re-auth so
+      // they land back on the draft they were editing instead of /creator/campaigns.
+      const returnTo = draftId
+        ? `/creator/campaigns/${draftId}/edit`
+        : window.location.pathname
+      localStorage.setItem("cr_post_login_redirect", returnTo)
       toast.message("Granting tracking-link permission…", {
         description:
           "We'll bounce you through Fanvue to grant 'tracking_links' scope, then come back here.",
