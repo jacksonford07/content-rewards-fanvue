@@ -1165,6 +1165,64 @@ export class SubmissionsService {
     return { success: true };
   }
 
+  /**
+   * v1.2 M3.1 — creator-triggered revoke. Stops further accrual on a
+   * per-sub submission by deleting its Fanvue tracking link and setting
+   * the submission status to `revoked`. Prior accrued earnings stand —
+   * the creator can still mark-paid the submission afterwards.
+   *
+   * Distinct from ban() which is heavier (also bans the clipper from the
+   * campaign and zeros pendingEarnings). Revoke is a clean stop without
+   * punishing the clipper.
+   */
+  async revoke(id: string, creatorId: string) {
+    const submission = await this.getOwnedSubmission(id, creatorId);
+
+    if (
+      submission.status === "revoked" ||
+      submission.status === "rejected" ||
+      submission.status === "paid_off_platform"
+    ) {
+      throw new BadRequestException(
+        `Submission is ${submission.status} — nothing to revoke`,
+      );
+    }
+
+    // Best-effort Fanvue DELETE. If the link is already gone (404) or the
+    // token is dead, we still flip status locally — the user-visible
+    // state of "this promoter no longer accrues" is what matters.
+    if (submission.trackingLinkUuid) {
+      try {
+        const [creator] = await this.db
+          .select({ accessToken: schema.users.fanvueAccessToken })
+          .from(schema.users)
+          .where(eq(schema.users.id, creatorId))
+          .limit(1);
+        if (creator?.accessToken) {
+          await this.fanvueLinks.deleteLink({
+            accessToken: creator.accessToken,
+            uuid: submission.trackingLinkUuid,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Tracking link delete failed during revoke for ${submission.trackingLinkUuid}: ${err}`,
+        );
+      }
+    }
+
+    await this.db
+      .update(schema.submissions)
+      .set({
+        status: "revoked",
+        creatorDecisionAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.submissions.id, id));
+
+    return { success: true };
+  }
+
   async verifyViews(id: string, creatorId: string, views: number) {
     const submission = await this.getOwnedSubmission(id, creatorId);
 

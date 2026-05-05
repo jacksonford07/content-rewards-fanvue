@@ -279,6 +279,11 @@ function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?
       className: "border-destructive/40 bg-destructive/10 text-destructive",
       icon: <XCircle className="size-3" weight="fill" />,
     },
+    revoked: {
+      label: "Link revoked",
+      className: "border-muted/60 bg-muted/30 text-muted-foreground",
+      icon: <Prohibit className="size-3" weight="bold" />,
+    },
   }
   const s = map[status]
   return (

@@ -94,6 +94,17 @@ export class SubmissionsController {
     return this.submissionsService.ban(id, req.user.id, body.reason);
   }
 
+  // v1.2 M3.1 — creator revokes a per-sub submission's tracking link.
+  // Stops further accrual; prior accrued earnings stand. Distinct from
+  // ban (which also blacklists the clipper and zeros earnings).
+  @Post(":id/revoke")
+  revoke(
+    @Param("id") id: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.submissionsService.revoke(id, req.user.id);
+  }
+
   @Post(":id/verify-views")
   verifyViews(
     @Param("id") id: string,

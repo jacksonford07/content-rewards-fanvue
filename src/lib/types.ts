@@ -18,6 +18,7 @@ export type SubmissionStatus =
   | "ready_to_pay"
   | "paid_off_platform"
   | "disputed"
+  | "revoked"
 
 export type RequirementsType = "native" | "google_doc"
 

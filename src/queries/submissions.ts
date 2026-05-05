@@ -279,6 +279,25 @@ export function useRejectSubmission(
   })
 }
 
+// v1.2 M3.1 — creator revokes a per-sub tracking link. Distinct from ban
+// (which also blacklists the clipper). Prior accrued earnings stand.
+export function useRevokeSubmission(
+  options?: TMutationOptions<unknown, string>,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await api.post(`/submissions/${id}/revoke`)
+      return res.data
+    },
+    ...options,
+    onSuccess: (...args) => {
+      invalidateSubmissionFamily(qc)
+      options?.onSuccess?.(...args)
+    },
+  })
+}
+
 export function useBanSubmission(
   options?: TMutationOptions<unknown, { id: string; reason: string }>,
 ) {
