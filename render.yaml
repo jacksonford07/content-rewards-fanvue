@@ -103,11 +103,13 @@ services:
           name: content-rewards-fanvue
           envVarKey: CRON_SECRET
 
-  # M4 — sync acquired-subscribers from Fanvue tracking links every 6h.
+  # M4 / v1.2 M2.3 — sync acquired-subs + clicks from Fanvue tracking
+  # links every 30 minutes (was 6h pre-v1.2 — bumped per 2026-05-05 sync
+  # so promoter workspace + roster surface fresher data).
   - type: cron
     name: sync-subscribers
     runtime: node
-    schedule: "0 */6 * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ":"
     startCommand: |
       node -e "fetch('https://content-rewards-fanvue.onrender.com/api/cron/sync-subscribers',{method:'POST',headers:{'x-cron-secret':process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"

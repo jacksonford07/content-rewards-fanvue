@@ -75,6 +75,7 @@ export interface Campaign {
   payoutType: "per_1k_views" | "per_subscriber"
   ratePerSub: number
   applicationMode?: "auto" | "manual"
+  trafficRules?: string | null
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -125,6 +126,7 @@ export interface Submission {
   trackingLinkSlug?: string | null
   trackingLinkUrl?: string | null
   lastAcquiredSubs?: number
+  lastClicks?: number
 }
 
 export interface PayoutEventSummary {

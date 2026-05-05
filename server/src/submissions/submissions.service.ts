@@ -254,6 +254,7 @@ export class SubmissionsService {
         ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
         : null,
       lastAcquiredSubs: s.lastAcquiredSubs,
+      lastClicks: s.lastClicks ?? 0,
       pendingEarnings: s.pendingEarningsCents
         ? s.pendingEarningsCents / 100
         : 0,
@@ -1031,9 +1032,34 @@ export class SubmissionsService {
         .from(schema.users)
         .where(eq(schema.users.id, submission.fanId))
         .limit(1);
+      // v1.2 M2.7 — naming convention `<campaign> Clipper N` so creators
+      // can identify links in their Fanvue dashboard. N = current count of
+      // approved per-sub submissions on this campaign + 1 (the one we're
+      // about to mint). Excludes the submission being minted from the
+      // count to avoid double-incrementing if we re-enter via retry.
+      const [{ count } = { count: 0 }] = await this.db
+        .select({
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.submissions)
+        .where(
+          and(
+            eq(schema.submissions.campaignId, campaign.id),
+            inArray(schema.submissions.status, [
+              "approved",
+              "auto_approved",
+              "ready_to_pay",
+              "paid_off_platform",
+              "disputed",
+            ]),
+            sql`${schema.submissions.id} <> ${submission.id}`,
+          ),
+        );
+      const ordinal = (count ?? 0) + 1;
+      const handle = clipper?.handle ?? "clipper";
       const link = await this.fanvueLinks.createLink({
         accessToken: creator.accessToken,
-        name: `${clipper?.handle ?? "clipper"} · ${campaign.title}`,
+        name: `${campaign.title} · Clipper ${ordinal} (@${handle})`,
         // Per-sub apply flow may have no platform yet — fall back to "other".
         platform:
           (submission.platform as "tiktok" | "instagram" | "youtube" | null) ??
@@ -1481,6 +1507,7 @@ export class SubmissionsService {
           ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
           : null,
         lastAcquiredSubs: s.lastAcquiredSubs ?? 0,
+        lastClicks: s.lastClicks ?? 0,
       };
     });
   }

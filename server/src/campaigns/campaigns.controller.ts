@@ -131,6 +131,7 @@ export class CampaignsController {
       ratePerSub?: number;
       applicationMode?: "auto" | "manual";
       endsAt?: string;
+      trafficRules?: string;
     },
   ) {
     return this.campaignsService.create(req.user.id, body);
