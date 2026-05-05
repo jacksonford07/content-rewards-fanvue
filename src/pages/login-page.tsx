@@ -213,7 +213,9 @@ export function LoginPage() {
                   )}
 
                   <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/60">
-                    By continuing you agree to Fanvue's Terms of Service.
+                    By continuing you agree to Fanvue's Terms of Service,
+                    including Content Rewards' anti-botting policy
+                    (campaigns may only be promoted with organic traffic).
                     <br />
                     Content Rewards is a third-party app on the Fanvue
                     platform.
