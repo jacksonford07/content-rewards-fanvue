@@ -15,6 +15,7 @@ import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
 import { TrustService } from "../trust/trust.service.js";
 import { FanvueTrackingLinksService } from "../fanvue/fanvue-tracking-links.service.js";
+import { PosthogService } from "../posthog/posthog.service.js";
 
 type EnrichedSubmission = {
   status: string;
@@ -111,6 +112,7 @@ export class SubmissionsService {
     private aiVerification: AiVerificationService,
     private trust: TrustService,
     private fanvueLinks: FanvueTrackingLinksService,
+    private posthog: PosthogService,
   ) {}
 
   /**
@@ -217,6 +219,15 @@ export class SubmissionsService {
     if (isAuto) {
       await this.tryMintTrackingLink(submission!, campaign);
     }
+
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("submission_created", fanId, {
+      submission_id: submission!.id,
+      campaign_id: campaign.id,
+      payout_type: campaign.payoutType,
+      application_mode: campaign.applicationMode,
+      auto_approved: isAuto,
+    });
 
     await this.notifications.create({
       userId: campaign.creatorId,
@@ -845,6 +856,14 @@ export class SubmissionsService {
       .set({ status: "paid_off_platform", updatedAt: new Date() })
       .where(eq(schema.submissions.id, submissionId));
 
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("submission_marked_paid", creatorId, {
+      submission_id: submissionId,
+      campaign_id: submission.campaignId,
+      method: body.method,
+      amount_cents: submission.payoutAmountCents ?? 0,
+    });
+
     // Notify the clipper that the creator has marked them paid. M3.5 will
     // turn this into the "Did you receive payment?" confirmation flow.
     await this.notifications.create({
@@ -1075,6 +1094,12 @@ export class SubmissionsService {
       this.logger.log(
         `Minted tracking link ${link.uuid} (${link.linkUrl}) for submission ${submission.id}`,
       );
+      // v1.2 M4 — PRD §S5
+      this.posthog.capture("tracking_link_minted", submission.fanId, {
+        submission_id: submission.id,
+        campaign_id: campaign.id,
+        link_uuid: link.uuid,
+      });
     } catch (err) {
       this.logger.error(
         `Tracking link mint failed for submission ${submission.id}: ${err}`,
@@ -1219,6 +1244,12 @@ export class SubmissionsService {
         updatedAt: new Date(),
       })
       .where(eq(schema.submissions.id, id));
+
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("tracking_link_revoked", creatorId, {
+      submission_id: id,
+      campaign_id: submission.campaignId,
+    });
 
     return { success: true };
   }

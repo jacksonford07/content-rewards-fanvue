@@ -10,6 +10,7 @@ import { and, desc, eq, gt, ilike, inArray, not, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 import { TrustService, type TrustScore } from "../trust/trust.service.js";
+import { PosthogService } from "../posthog/posthog.service.js";
 
 function generatePrivateSlug(): string {
   return randomBytes(9)
@@ -49,6 +50,7 @@ export class CampaignsService {
   constructor(
     @Inject(DB) private db: Database,
     private trust: TrustService,
+    private posthog: PosthogService,
   ) {}
 
   async sourceStatus(id: string): Promise<{ available: boolean }> {
@@ -527,6 +529,28 @@ export class CampaignsService {
         endsAt,
       })
       .returning();
+
+    // v1.2 M4 — PRD §S5 events. Fired only when the campaign actually
+    // goes live (status === "active"); drafts don't count.
+    if (campaign && campaign.status === "active") {
+      this.posthog.capture("campaign_created", creatorId, {
+        campaign_id: campaign.id,
+        payout_type: campaign.payoutType,
+        total_budget_cents: campaign.totalBudgetCents,
+        is_private: campaign.isPrivate,
+      });
+      if (campaign.payoutType === "per_subscriber") {
+        this.posthog.capture(
+          "subscriber_campaign_created",
+          creatorId,
+          {
+            campaign_id: campaign.id,
+            rate_per_sub_cents: campaign.ratePerSubCents,
+            application_mode: campaign.applicationMode,
+          },
+        );
+      }
+    }
 
     return this.serializeSingle(campaign!);
   }
