@@ -180,6 +180,9 @@ export const submissions = pgTable("submissions", {
       "ready_to_pay",
       "paid_off_platform",
       "disputed",
+      // v1.2 M3 — creator revoked the tracking link (or Fanvue lost it).
+      // Accrual stops; prior accrued earnings stand.
+      "revoked",
     ],
   })
     .default("pending")

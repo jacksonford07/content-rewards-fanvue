@@ -104,7 +104,24 @@ export class CronService {
           for (const sub of group.submissions) {
             if (!sub.trackingLinkUuid) continue;
             const link = linksByUuid.get(sub.trackingLinkUuid);
-            if (!link) continue;
+            if (!link) {
+              // v1.2 M3.4 — creator deleted the link from Fanvue
+              // dashboard (or it was rotated out). Auto-revoke the
+              // submission to stop further accrual attempts. Prior
+              // accrued earnings stand.
+              await this.db
+                .update(schema.submissions)
+                .set({
+                  status: "revoked",
+                  creatorDecisionAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .where(eq(schema.submissions.id, sub.id));
+              this.logger.log(
+                `Auto-revoked submission ${sub.id}: tracking link ${sub.trackingLinkUuid} not in Fanvue listing`,
+              );
+              continue;
+            }
             const acquired = Math.floor(link.engagement.acquiredSubscribers);
             // v1.2 M2.2 — also snapshot click count. Clicks do not accrue
             // earnings on their own (per-sub rate is on acquired subs);

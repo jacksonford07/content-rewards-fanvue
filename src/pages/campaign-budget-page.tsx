@@ -9,6 +9,7 @@ import {
   Info,
   Lightning,
   Lock,
+  Prohibit,
   Stop,
   Users,
 } from "@phosphor-icons/react"
@@ -39,6 +40,7 @@ import { formatCurrency } from "@/lib/mock-data"
 import { useCampaign } from "@/queries/campaigns"
 import {
   useApproveSubmission,
+  useRevokeSubmission,
   useCloseCampaign,
   useRejectSubmission,
   useSubmissionsByCampaign,
@@ -68,6 +70,8 @@ export function CampaignBudgetPage() {
   const closeMutation = useCloseCampaign()
   const approveMutation = useApproveSubmission()
   const rejectMutation = useRejectSubmission()
+  const revokeMutation = useRevokeSubmission()
+  const [revokeId, setRevokeId] = useState<string | null>(null)
 
   const [closeOpen, setCloseOpen] = useState(false)
   const [markPaidId, setMarkPaidId] = useState<string | null>(null)
@@ -82,7 +86,9 @@ export function CampaignBudgetPage() {
     const settled = rows.filter(
       (s) => s.status === "paid_off_platform" || s.status === "paid",
     )
-    return { accruing, pending, ready, settled }
+    // v1.2 M3 — revoked submissions are visible but inert.
+    const revoked = rows.filter((s) => s.status === "revoked")
+    return { accruing, pending, ready, settled, revoked }
   }, [submissions])
 
   if (loading) {
@@ -322,6 +328,15 @@ export function CampaignBudgetPage() {
               hint="Sub + click deltas land every 30 min via the attribution cron."
               icon={<Lightning className="size-4" />}
               rows={grouped.accruing}
+              actions={(s) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setRevokeId(s.id)}
+                >
+                  Revoke
+                </Button>
+              )}
             />
           )}
           {grouped.ready.length > 0 && (
@@ -341,6 +356,14 @@ export function CampaignBudgetPage() {
               title="Paid"
               icon={<CheckCircle className="size-4" />}
               rows={grouped.settled}
+            />
+          )}
+          {grouped.revoked.length > 0 && (
+            <ClipperSection
+              title="Revoked"
+              hint="Tracking link revoked — no further accrual. Prior earnings stand."
+              icon={<Prohibit className="size-4" />}
+              rows={grouped.revoked}
             />
           )}
           {(submissions?.length ?? 0) === 0 && (
@@ -377,6 +400,42 @@ export function CampaignBudgetPage() {
               disabled={closeMutation.isPending}
             >
               {closeMutation.isPending ? "Closing…" : "Close campaign"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* v1.2 M3.1 — confirm revoke. Destructive (deletes the Fanvue link) */}
+      <AlertDialog
+        open={!!revokeId}
+        onOpenChange={(o) => !o && setRevokeId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke this promoter's link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The Fanvue tracking link will be deleted and accrual stops
+              immediately. Earnings already accrued stand and can still be
+              marked paid. The promoter will not be banned and can apply
+              to your other campaigns.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!revokeId) return
+                try {
+                  await revokeMutation.mutateAsync(revokeId)
+                  toast.success("Tracking link revoked")
+                  setRevokeId(null)
+                } catch {
+                  toast.error("Couldn't revoke")
+                }
+              }}
+              disabled={revokeMutation.isPending}
+            >
+              {revokeMutation.isPending ? "Revoking…" : "Revoke link"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
