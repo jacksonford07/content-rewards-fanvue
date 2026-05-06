@@ -611,10 +611,14 @@ export function CreatorCampaignsPage() {
                     <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
                       <MiniStat
                         label="Rate"
-                        value={`${formatCurrency(c.rewardRatePer1k)}/1K`}
+                        value={
+                          c.payoutType === "per_subscriber"
+                            ? `${formatCurrency(c.ratePerSub)}/sub`
+                            : `${formatCurrency(c.rewardRatePer1k)}/1K`
+                        }
                       />
                       <MiniStat
-                        label="Views"
+                        label={c.payoutType === "per_subscriber" ? "Subs" : "Views"}
                         value={formatCompactNumber(c.totalViews)}
                       />
                       <MiniStat

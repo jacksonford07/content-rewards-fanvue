@@ -552,6 +552,15 @@ function InboxRow({
                     : ""}{" "}
                   · {timeAgo(submission.submittedAt)}
                 </p>
+                {/* Bug D: surface campaign title so creators with multiple
+                    active campaigns can disambiguate. Especially load-bearing
+                    for per-sub applies, which carry no clip thumbnail. */}
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
+                  Applied to:{" "}
+                  <span className="font-medium text-foreground/90">
+                    {submission.campaignTitle}
+                  </span>
+                </p>
               </div>
             </div>
 
