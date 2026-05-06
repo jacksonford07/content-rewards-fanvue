@@ -874,27 +874,50 @@ export function CreateCampaignPage() {
                 <Sparkle className="size-4 text-primary" weight="fill" />
                 <AlertTitle>Spend preview</AlertTitle>
                 <AlertDescription className="space-y-1">
-                  <span className="block">
-                    At{" "}
-                    <strong className="text-foreground">
-                      {formatCurrency(rateNum)} per 1K views
-                    </strong>
-                    , {formatCurrency(budgetNum)} covers approximately{" "}
-                    <strong className="text-foreground">
-                      {Math.floor((budgetNum / rateNum) * 1000).toLocaleString()}{" "}
-                      verified views
-                    </strong>
-                    .
-                  </span>
-                  {state.maxPerClip && (
-                    <span className="block">
-                      With a {formatCurrency(parseFloat(state.maxPerClip))}/clip
-                      cap, you could pay out up to{" "}
-                      <strong className="text-foreground">
-                        {clipsAffordable} max-cap clips
-                      </strong>
-                      .
-                    </span>
+                  {state.payoutType === "per_subscriber" ? (
+                    (() => {
+                      const subRate = parseFloat(state.ratePerSub || "0")
+                      const subsCovered =
+                        subRate > 0 ? Math.floor(budgetNum / subRate) : 0
+                      return (
+                        <span className="block">
+                          At{" "}
+                          <strong className="text-foreground">
+                            {formatCurrency(subRate)} per subscriber
+                          </strong>
+                          , {formatCurrency(budgetNum)} covers approximately{" "}
+                          <strong className="text-foreground">
+                            {subsCovered.toLocaleString()} acquired subscribers
+                          </strong>
+                          .
+                        </span>
+                      )
+                    })()
+                  ) : (
+                    <>
+                      <span className="block">
+                        At{" "}
+                        <strong className="text-foreground">
+                          {formatCurrency(rateNum)} per 1K views
+                        </strong>
+                        , {formatCurrency(budgetNum)} covers approximately{" "}
+                        <strong className="text-foreground">
+                          {Math.floor((budgetNum / rateNum) * 1000).toLocaleString()}{" "}
+                          verified views
+                        </strong>
+                        .
+                      </span>
+                      {state.maxPerClip && (
+                        <span className="block">
+                          With a {formatCurrency(parseFloat(state.maxPerClip))}/clip
+                          cap, you could pay out up to{" "}
+                          <strong className="text-foreground">
+                            {clipsAffordable} max-cap clips
+                          </strong>
+                          .
+                        </span>
+                      )}
+                    </>
                   )}
                 </AlertDescription>
               </Alert>
