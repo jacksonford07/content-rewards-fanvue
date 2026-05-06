@@ -880,6 +880,24 @@ export function CampaignDetailPage() {
                 </p>
               )}
 
+              {/* v1.2 M2.5 — creator's self-reported page price snapshotted
+                  at campaign create. Lets clippers reason about how hard
+                  the subs will be to acquire — free pages convert
+                  differently from paid pages. */}
+              {isPerSub &&
+                campaign.creatorSubPriceAtCreationCents != null && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    @{campaign.creator.handle}'s page:{" "}
+                    <span className="text-foreground font-medium">
+                      {campaign.creatorSubPriceAtCreationCents === 0
+                        ? "Free"
+                        : `${formatCurrency(
+                            campaign.creatorSubPriceAtCreationCents / 100,
+                          )}/mo`}
+                    </span>
+                  </p>
+                )}
+
               <Separator className="my-4" />
 
               <div className="space-y-3 text-sm">

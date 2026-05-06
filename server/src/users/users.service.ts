@@ -21,6 +21,7 @@ export class UsersService {
       displayName?: string;
       avatarUrl?: string;
       role?: "clipper" | "creator";
+      fanvuePageSubPriceCents?: number | null;
     },
   ) {
     // Role is a one-time choice. Once set to clipper or creator, it cannot
@@ -39,6 +40,15 @@ export class UsersService {
           );
         }
       }
+    }
+
+    // v1.2 M2.5 — basic sanity on the price. Negative = nope.
+    if (
+      data.fanvuePageSubPriceCents !== undefined &&
+      data.fanvuePageSubPriceCents !== null &&
+      data.fanvuePageSubPriceCents < 0
+    ) {
+      throw new BadRequestException("Page price must be 0 or positive cents");
     }
 
     const [user] = await this.db

@@ -77,6 +77,9 @@ export interface Campaign {
   ratePerSub: number
   applicationMode?: "auto" | "manual"
   trafficRules?: string | null
+  // v1.2 M2.5 — snapshot of the creator's self-reported page price
+  // (cents) at campaign creation time. null = creator hadn't set it.
+  creatorSubPriceAtCreationCents?: number | null
   createdAt: string
   goesLiveAt: string
   endsAt?: string

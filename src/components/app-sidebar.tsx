@@ -13,6 +13,7 @@ import {
   SignOut,
   CaretUpDown,
   Wallet,
+  UserCircle,
   ShieldStar,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
@@ -98,6 +99,7 @@ export function AppSidebar() {
     { to: "/", label: "Campaigns hub", icon: House, end: true },
     { to: "/creator/inbox", label: "Submission inbox", icon: Tray, badge: counts.inbox || undefined },
     { to: "/creator/analytics", label: "Analytics", icon: ChartBar },
+    { to: "/settings/profile", label: "Profile settings", icon: UserCircle },
   ], [counts.inbox])
 
   const bottomNav = useMemo(() => [

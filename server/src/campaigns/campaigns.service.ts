@@ -497,6 +497,19 @@ export class CampaignsService {
       endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     }
 
+    // v1.2 M2.5 — snapshot creator's self-reported Fanvue page price for
+    // per-sub campaigns. Lets the campaign card show "@handle's page is
+    // $X/mo" even if creator later edits their price. null = unset.
+    let creatorSubPriceAtCreationCents: number | null = null;
+    if (isPerSub) {
+      const [creator] = await this.db
+        .select({ price: schema.users.fanvuePageSubPriceCents })
+        .from(schema.users)
+        .where(eq(schema.users.id, creatorId))
+        .limit(1);
+      creatorSubPriceAtCreationCents = creator?.price ?? null;
+    }
+
     const [campaign] = await this.db
       .insert(schema.campaigns)
       .values({
@@ -516,6 +529,7 @@ export class CampaignsService {
         ratePerSubCents: Math.round((data.ratePerSub ?? 0) * 100),
         applicationMode: data.applicationMode ?? "auto",
         trafficRules: data.trafficRules ?? null,
+        creatorSubPriceAtCreationCents,
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -1044,6 +1058,8 @@ export class CampaignsService {
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
       trafficRules: c.trafficRules,
+      // v1.2 M2.5 — snapshot in dollars (or null/0 — see schema convention)
+      creatorSubPriceAtCreationCents: c.creatorSubPriceAtCreationCents,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
@@ -1082,6 +1098,8 @@ export class CampaignsService {
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
       trafficRules: c.trafficRules,
+      // v1.2 M2.5 — snapshot in dollars (or null/0 — see schema convention)
+      creatorSubPriceAtCreationCents: c.creatorSubPriceAtCreationCents,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
