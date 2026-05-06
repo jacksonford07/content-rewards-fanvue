@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
+  ArrowRight,
   ArrowSquareOut,
   CloudArrowDown,
   Eye,
@@ -56,6 +57,7 @@ import {
 } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PlatformIcon } from "@/components/platform-icon"
+import { CampaignTypeBadge } from "@/components/campaign-type-badge"
 import {
   formatCompactNumber,
   formatCurrency,
@@ -566,6 +568,9 @@ export function CampaignDetailPage() {
           {/* Title + status */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
+              <div className="mb-1.5">
+                <CampaignTypeBadge payoutType={campaign.payoutType} size="md" />
+              </div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
                   {campaign.title}
@@ -920,7 +925,26 @@ export function CampaignDetailPage() {
               </div>
 
               {viewerIsCreatorRole ? (
-                isOwner ? null : (
+                isOwner ? (
+                  isPerSub ? (
+                    <div className="mt-6 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                      <p className="text-sm font-medium">
+                        Manage your promoters
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        See clicks, acquired subs, and earnings per promoter —
+                        approve, mark paid, or close the campaign from the
+                        budget page.
+                      </p>
+                      <Button asChild size="sm" className="mt-3" variant="outline">
+                        <Link to={`/creator/campaigns/${campaign.id}/budget`}>
+                          Open promoter roster
+                          <ArrowRight className="size-3.5" />
+                        </Link>
+                      </Button>
+                    </div>
+                  ) : null
+                ) : (
                   <div className="mt-6 rounded-lg border border-border/60 bg-muted/40 p-4 text-center">
                     <p className="text-sm font-medium">Creator view</p>
                     <p className="mt-1 text-xs text-muted-foreground">

@@ -2,6 +2,8 @@ export const platformLabels: Record<string, string> = {
   tiktok: "TikTok",
   instagram: "Instagram Reels",
   youtube: "YouTube",
+  reddit: "Reddit",
+  x: "X",
 }
 
 export function formatCurrency(amount: number): string {

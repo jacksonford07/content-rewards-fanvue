@@ -15,6 +15,7 @@ import { ScrapersService } from "../scrapers/scrapers.service.js";
 import { resolveShortUrl } from "../scrapers/scrapers.types.js";
 import { TrustService } from "../trust/trust.service.js";
 import { FanvueTrackingLinksService } from "../fanvue/fanvue-tracking-links.service.js";
+import { PosthogService } from "../posthog/posthog.service.js";
 
 type EnrichedSubmission = {
   status: string;
@@ -111,6 +112,7 @@ export class SubmissionsService {
     private aiVerification: AiVerificationService,
     private trust: TrustService,
     private fanvueLinks: FanvueTrackingLinksService,
+    private posthog: PosthogService,
   ) {}
 
   /**
@@ -218,6 +220,15 @@ export class SubmissionsService {
       await this.tryMintTrackingLink(submission!, campaign);
     }
 
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("submission_created", fanId, {
+      submission_id: submission!.id,
+      campaign_id: campaign.id,
+      payout_type: campaign.payoutType,
+      application_mode: campaign.applicationMode,
+      auto_approved: isAuto,
+    });
+
     await this.notifications.create({
       userId: campaign.creatorId,
       type: "new_submission",
@@ -254,6 +265,7 @@ export class SubmissionsService {
         ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
         : null,
       lastAcquiredSubs: s.lastAcquiredSubs,
+      lastClicks: s.lastClicks ?? 0,
       pendingEarnings: s.pendingEarningsCents
         ? s.pendingEarningsCents / 100
         : 0,
@@ -844,6 +856,14 @@ export class SubmissionsService {
       .set({ status: "paid_off_platform", updatedAt: new Date() })
       .where(eq(schema.submissions.id, submissionId));
 
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("submission_marked_paid", creatorId, {
+      submission_id: submissionId,
+      campaign_id: submission.campaignId,
+      method: body.method,
+      amount_cents: submission.payoutAmountCents ?? 0,
+    });
+
     // Notify the clipper that the creator has marked them paid. M3.5 will
     // turn this into the "Did you receive payment?" confirmation flow.
     await this.notifications.create({
@@ -1031,9 +1051,34 @@ export class SubmissionsService {
         .from(schema.users)
         .where(eq(schema.users.id, submission.fanId))
         .limit(1);
+      // v1.2 M2.7 — naming convention `<campaign> Clipper N` so creators
+      // can identify links in their Fanvue dashboard. N = current count of
+      // approved per-sub submissions on this campaign + 1 (the one we're
+      // about to mint). Excludes the submission being minted from the
+      // count to avoid double-incrementing if we re-enter via retry.
+      const [{ count } = { count: 0 }] = await this.db
+        .select({
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.submissions)
+        .where(
+          and(
+            eq(schema.submissions.campaignId, campaign.id),
+            inArray(schema.submissions.status, [
+              "approved",
+              "auto_approved",
+              "ready_to_pay",
+              "paid_off_platform",
+              "disputed",
+            ]),
+            sql`${schema.submissions.id} <> ${submission.id}`,
+          ),
+        );
+      const ordinal = (count ?? 0) + 1;
+      const handle = clipper?.handle ?? "clipper";
       const link = await this.fanvueLinks.createLink({
         accessToken: creator.accessToken,
-        name: `${clipper?.handle ?? "clipper"} · ${campaign.title}`,
+        name: `${campaign.title} · Clipper ${ordinal} (@${handle})`,
         // Per-sub apply flow may have no platform yet — fall back to "other".
         platform:
           (submission.platform as "tiktok" | "instagram" | "youtube" | null) ??
@@ -1049,6 +1094,12 @@ export class SubmissionsService {
       this.logger.log(
         `Minted tracking link ${link.uuid} (${link.linkUrl}) for submission ${submission.id}`,
       );
+      // v1.2 M4 — PRD §S5
+      this.posthog.capture("tracking_link_minted", submission.fanId, {
+        submission_id: submission.id,
+        campaign_id: campaign.id,
+        link_uuid: link.uuid,
+      });
     } catch (err) {
       this.logger.error(
         `Tracking link mint failed for submission ${submission.id}: ${err}`,
@@ -1135,6 +1186,70 @@ export class SubmissionsService {
         );
       }
     }
+
+    return { success: true };
+  }
+
+  /**
+   * v1.2 M3.1 — creator-triggered revoke. Stops further accrual on a
+   * per-sub submission by deleting its Fanvue tracking link and setting
+   * the submission status to `revoked`. Prior accrued earnings stand —
+   * the creator can still mark-paid the submission afterwards.
+   *
+   * Distinct from ban() which is heavier (also bans the clipper from the
+   * campaign and zeros pendingEarnings). Revoke is a clean stop without
+   * punishing the clipper.
+   */
+  async revoke(id: string, creatorId: string) {
+    const submission = await this.getOwnedSubmission(id, creatorId);
+
+    if (
+      submission.status === "revoked" ||
+      submission.status === "rejected" ||
+      submission.status === "paid_off_platform"
+    ) {
+      throw new BadRequestException(
+        `Submission is ${submission.status} — nothing to revoke`,
+      );
+    }
+
+    // Best-effort Fanvue DELETE. If the link is already gone (404) or the
+    // token is dead, we still flip status locally — the user-visible
+    // state of "this promoter no longer accrues" is what matters.
+    if (submission.trackingLinkUuid) {
+      try {
+        const [creator] = await this.db
+          .select({ accessToken: schema.users.fanvueAccessToken })
+          .from(schema.users)
+          .where(eq(schema.users.id, creatorId))
+          .limit(1);
+        if (creator?.accessToken) {
+          await this.fanvueLinks.deleteLink({
+            accessToken: creator.accessToken,
+            uuid: submission.trackingLinkUuid,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Tracking link delete failed during revoke for ${submission.trackingLinkUuid}: ${err}`,
+        );
+      }
+    }
+
+    await this.db
+      .update(schema.submissions)
+      .set({
+        status: "revoked",
+        creatorDecisionAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.submissions.id, id));
+
+    // v1.2 M4 — PRD §S5
+    this.posthog.capture("tracking_link_revoked", creatorId, {
+      submission_id: id,
+      campaign_id: submission.campaignId,
+    });
 
     return { success: true };
   }
@@ -1481,6 +1596,7 @@ export class SubmissionsService {
           ? this.fanvueLinks.resolveTrackingUrl(s.trackingLinkSlug)
           : null,
         lastAcquiredSubs: s.lastAcquiredSubs ?? 0,
+        lastClicks: s.lastClicks ?? 0,
       };
     });
   }

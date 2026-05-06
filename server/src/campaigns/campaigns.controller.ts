@@ -53,6 +53,7 @@ export class CampaignsController {
     @Query("search") search?: string,
     @Query("page") page?: string,
     @Query("limit") limit?: string,
+    @Query("payout_type") payoutType?: string,
   ) {
     return this.campaignsService.list({
       platforms: platforms ? platforms.split(",") : undefined,
@@ -63,6 +64,10 @@ export class CampaignsController {
       viewerId: req.user.id,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      payoutType:
+        payoutType === "per_1k_views" || payoutType === "per_subscriber"
+          ? payoutType
+          : undefined,
     });
   }
 
@@ -126,6 +131,7 @@ export class CampaignsController {
       ratePerSub?: number;
       applicationMode?: "auto" | "manual";
       endsAt?: string;
+      trafficRules?: string;
     },
   ) {
     return this.campaignsService.create(req.user.id, body);

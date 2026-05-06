@@ -1,6 +1,6 @@
 import type { PayoutMethod } from "@/lib/payout-validators"
 
-export type Platform = "tiktok" | "instagram" | "youtube"
+export type Platform = "tiktok" | "instagram" | "youtube" | "reddit" | "x"
 
 export type CampaignStatus =
   | "draft"
@@ -18,6 +18,7 @@ export type SubmissionStatus =
   | "ready_to_pay"
   | "paid_off_platform"
   | "disputed"
+  | "revoked"
 
 export type RequirementsType = "native" | "google_doc"
 
@@ -75,6 +76,7 @@ export interface Campaign {
   payoutType: "per_1k_views" | "per_subscriber"
   ratePerSub: number
   applicationMode?: "auto" | "manual"
+  trafficRules?: string | null
   createdAt: string
   goesLiveAt: string
   endsAt?: string
@@ -125,6 +127,7 @@ export interface Submission {
   trackingLinkSlug?: string | null
   trackingLinkUrl?: string | null
   lastAcquiredSubs?: number
+  lastClicks?: number
 }
 
 export interface PayoutEventSummary {

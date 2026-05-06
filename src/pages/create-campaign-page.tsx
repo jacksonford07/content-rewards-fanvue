@@ -16,6 +16,8 @@ import {
   FloppyDisk,
   Lock,
   Copy,
+  Scissors,
+  UserPlus,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -116,6 +118,9 @@ export function CreateCampaignPage() {
 
   const [step, setStep] = useState(1)
   const [maxStep, setMaxStep] = useState(1)
+  // M1.2: pop a mode-selection modal once per draft on entry. Editing an
+  // existing draft skips the modal because payoutType is already set.
+  const [modeModalOpen, setModeModalOpen] = useState(false)
   const stepRefs = useRef<(HTMLLIElement | null)[]>([])
   const [state, setState] = useState(() => ({
     title: "",
@@ -130,6 +135,7 @@ export function CreateCampaignPage() {
     payoutType: "per_1k_views" as "per_1k_views" | "per_subscriber",
     applicationMode: "auto" as "auto" | "manual",
     endsAt: "",
+    trafficRules: "",
     totalBudget: "1000",
     minThreshold: "2000",
     maxPerClip: "",
@@ -142,6 +148,8 @@ export function CreateCampaignPage() {
   useEffect(() => {
     if (!id) {
       setInitialSnapshot(JSON.stringify(state))
+      // New drafts get the mode picker modal up-front.
+      setModeModalOpen(true)
       return
     }
     setLoadingExisting(true)
@@ -167,6 +175,7 @@ export function CreateCampaignPage() {
         ratePerSub: (c.ratePerSub ?? 5).toString(),
         applicationMode: (c.applicationMode ?? "auto") as "auto" | "manual",
         endsAt: c.endsAt ? c.endsAt.slice(0, 10) : "",
+        trafficRules: c.trafficRules ?? "",
       }
       setState(loaded)
       setInitialSnapshot(JSON.stringify(loaded))
@@ -304,6 +313,10 @@ export function CreateCampaignPage() {
         state.payoutType === "per_subscriber" && state.endsAt
           ? new Date(`${state.endsAt}T23:59:59Z`).toISOString()
           : undefined,
+      trafficRules:
+        state.payoutType === "per_subscriber" && state.trafficRules.trim()
+          ? state.trafficRules.trim()
+          : undefined,
       rewardRatePer1k: parseFloat(state.rewardRate) || 0,
       totalBudget: parseFloat(state.totalBudget) || 0,
       minPayoutThreshold: parseFloat(state.minThreshold) || 0,
@@ -349,11 +362,18 @@ export function CreateCampaignPage() {
     ) {
       const apiUrl = import.meta.env.VITE_API_URL || ""
       // Save a draft first so the campaign isn't lost during the OAuth bounce
+      let draftId: string | null = null
       try {
-        await saveCampaign("draft")
+        draftId = (await saveCampaign("draft")) ?? null
       } catch {
         // best effort
       }
+      // M0.3: tell the auth callback where to send the user after re-auth so
+      // they land back on the draft they were editing instead of /creator/campaigns.
+      const returnTo = draftId
+        ? `/creator/campaigns/${draftId}/edit`
+        : window.location.pathname
+      localStorage.setItem("cr_post_login_redirect", returnTo)
       toast.message("Granting tracking-link permission…", {
         description:
           "We'll bounce you through Fanvue to grant 'tracking_links' scope, then come back here.",
@@ -606,10 +626,15 @@ export function CreateCampaignPage() {
           {!loadingExisting && step === 4 && (
             <div className="space-y-3">
               <p className="text-sm font-medium">
-                Select all platforms where clippers can post
+                {state.payoutType === "per_subscriber"
+                  ? "Select platforms where promoters will share your tracking link"
+                  : "Select all platforms where clippers can post"}
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
-                {(["tiktok", "instagram", "youtube"] as Platform[]).map((p) => {
+                {(state.payoutType === "per_subscriber"
+                  ? (["instagram", "tiktok", "reddit", "x"] as Platform[])
+                  : (["tiktok", "instagram"] as Platform[])
+                ).map((p) => {
                   const selected = state.platforms.includes(p)
                   return (
                     <button
@@ -742,6 +767,25 @@ export function CreateCampaignPage() {
                     <p className="text-[11px] text-muted-foreground">
                       Accrual stops at the end date. Defaults to 30 days from
                       now if left blank.
+                    </p>
+                  </div>
+
+                  {/* v1.2 M2 — traffic rules per campaign */}
+                  <div className="space-y-2">
+                    <Label>Traffic rules (optional)</Label>
+                    <Textarea
+                      rows={5}
+                      placeholder={
+                        "e.g. No incentivised traffic, paid ads, or bot networks. Promote on your own audience only."
+                      }
+                      value={state.trafficRules}
+                      onChange={(e) =>
+                        update("trafficRules", e.target.value)
+                      }
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Surfaced to promoters in their workspace. Plain text;
+                      newlines preserved.
                     </p>
                   </div>
                 </>
@@ -1055,6 +1099,83 @@ export function CreateCampaignPage() {
             >
               Done
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* M1.2 — mode picker modal: fires once on entry to a new draft so
+           creators choose Clip vs Subscriber before composing platforms,
+           rate, etc. Editing existing drafts skips because payoutType is
+           already set. */}
+      <Dialog
+        open={modeModalOpen}
+        onOpenChange={(o) => setModeModalOpen(o)}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>What kind of campaign?</DialogTitle>
+            <DialogDescription>
+              Pick a payout model. You can change it later in step 5, but it
+              shapes the platforms and inputs the rest of the flow shows.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                {
+                  v: "per_1k_views",
+                  icon: Scissors,
+                  title: "Clip Campaign",
+                  hint: "Pay per 1,000 verified views. Best for bulk reach: clippers post short-form on TikTok / Instagram Reels.",
+                },
+                {
+                  v: "per_subscriber",
+                  icon: UserPlus,
+                  title: "Subscriber Campaign",
+                  hint: "Pay per acquired Fanvue subscriber via tracking link. Best for direct revenue: promoters share your page on IG, TikTok, Reddit, X.",
+                },
+              ] as const
+            ).map((opt) => {
+              const Icon = opt.icon
+              const selected = state.payoutType === opt.v
+              return (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => {
+                    update("payoutType", opt.v)
+                    // Reset platforms when switching mode — selectable
+                    // platforms differ between clip and per-sub.
+                    if (state.payoutType !== opt.v) {
+                      update("platforms", [])
+                    }
+                  }}
+                  className={cn(
+                    "flex flex-col items-start gap-2.5 rounded-xl border p-4 text-left transition-colors",
+                    selected
+                      ? "border-primary/60 bg-primary/10"
+                      : "border-border/70 bg-background/50 hover:border-border",
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      "size-6",
+                      selected ? "text-primary" : "text-muted-foreground",
+                    )}
+                    weight={selected ? "fill" : "regular"}
+                  />
+                  <div>
+                    <div className="text-sm font-semibold">{opt.title}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {opt.hint}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setModeModalOpen(false)}>Continue</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

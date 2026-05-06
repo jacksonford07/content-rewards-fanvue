@@ -40,11 +40,11 @@ import { useAuth } from "@/hooks/use-auth";
 import type { Platform } from "@/lib/types";
 
 type SortKey = "newest" | "highest_rate" | "most_popular";
+type CampaignTypeFilter = "all" | "per_1k_views" | "per_subscriber";
 
 const platformOptions: { value: Platform; label: string }[] = [
   { value: "tiktok", label: "TikTok" },
   { value: "instagram", label: "Instagram Reels" },
-  { value: "youtube", label: "YouTube" },
 ];
 
 export function HubPage() {
@@ -54,6 +54,8 @@ export function HubPage() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
   const [sort, setSort] = useState<SortKey>("newest");
   const [minRate, setMinRate] = useState("any");
+  const [campaignType, setCampaignType] = useState<CampaignTypeFilter>("all");
+  const [trustOnly, setTrustOnly] = useState(false);
   const [search, setSearch] = useState("");
 
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -76,7 +78,7 @@ export function HubPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, selectedPlatforms, minRate, sort]);
+  }, [debouncedSearch, selectedPlatforms, minRate, sort, campaignType, trustOnly]);
 
   const { data: resp, isLoading: loading } = useCampaigns({
     search: debouncedSearch || undefined,
@@ -86,6 +88,7 @@ export function HubPage() {
     sort: sort === "newest" ? undefined : sort,
     page,
     limit,
+    payoutType: campaignType === "all" ? undefined : campaignType,
   });
   const campaigns = resp?.data ?? [];
   const meta = resp?.meta;
@@ -97,11 +100,16 @@ export function HubPage() {
   const [draftPlatforms, setDraftPlatforms] = useState<Platform[]>([]);
   const [draftSort, setDraftSort] = useState<SortKey>("newest");
   const [draftMinRate, setDraftMinRate] = useState("any");
+  const [draftCampaignType, setDraftCampaignType] =
+    useState<CampaignTypeFilter>("all");
+  const [draftTrustOnly, setDraftTrustOnly] = useState(false);
 
   const openSheet = () => {
     setDraftPlatforms([...selectedPlatforms]);
     setDraftSort(sort);
     setDraftMinRate(minRate);
+    setDraftCampaignType(campaignType);
+    setDraftTrustOnly(trustOnly);
     setSheetOpen(true);
   };
 
@@ -109,6 +117,8 @@ export function HubPage() {
     setSelectedPlatforms(draftPlatforms);
     setSort(draftSort);
     setMinRate(draftMinRate);
+    setCampaignType(draftCampaignType);
+    setTrustOnly(draftTrustOnly);
     setSheetOpen(false);
   };
 
@@ -116,6 +126,8 @@ export function HubPage() {
     setDraftPlatforms([]);
     setDraftSort("newest");
     setDraftMinRate("any");
+    setDraftCampaignType("all");
+    setDraftTrustOnly(false);
   };
 
   const toggleDraftPlatform = (p: Platform) => {
@@ -127,9 +139,19 @@ export function HubPage() {
   const activeFilterCount =
     (selectedPlatforms.length > 0 ? 1 : 0) +
     (minRate !== "any" ? 1 : 0) +
-    (sort !== "newest" ? 1 : 0);
+    (sort !== "newest" ? 1 : 0) +
+    (campaignType !== "all" ? 1 : 0) +
+    (trustOnly ? 1 : 0);
 
-  const filtered = campaigns;
+  // Trust filter is page-local for now: keep only campaigns whose creator
+  // shows a fully clean payout history. Server-side trust filtering would
+  // duplicate the trust-sort SQL clauses — deferred (see decisions doc).
+  const filtered = trustOnly
+    ? campaigns.filter((c) => {
+        const r = c.creator.trust?.allTime?.creatorPaidRate;
+        return r != null && r >= 1;
+      })
+    : campaigns;
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8">
@@ -137,8 +159,8 @@ export function HubPage() {
         title="Content Rewards hub"
         description={
           viewerIsCreator
-            ? "Browse active clipping campaigns from creators across the platform."
-            : "Browse active clipping campaigns and earn per 1,000 verified views."
+            ? "Browse active clip and subscriber campaigns from creators across the platform."
+            : "Browse active campaigns — earn per 1,000 verified views or per acquired subscriber."
         }
         className="mb-6"
       />
@@ -188,6 +210,44 @@ export function HubPage() {
             </SheetHeader>
             <div className="flex-1 overflow-y-auto">
               <div className="flex flex-col gap-6 p-6">
+                {/* Campaign type */}
+                <div className="flex flex-col gap-2">
+                  <Label className="text-sm font-medium">Campaign type</Label>
+                  <Select
+                    value={draftCampaignType}
+                    onValueChange={(v) =>
+                      setDraftCampaignType(v as CampaignTypeFilter)
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All campaigns</SelectItem>
+                      <SelectItem value="per_1k_views">Clip campaigns</SelectItem>
+                      <SelectItem value="per_subscriber">
+                        Subscriber campaigns
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <hr className="border-border/60" />
+
+                {/* Trust */}
+                <div className="flex flex-col gap-2.5">
+                  <Label className="text-sm font-medium">Creator trust</Label>
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <Checkbox
+                      checked={draftTrustOnly}
+                      onCheckedChange={(v) => setDraftTrustOnly(v === true)}
+                    />
+                    <span className="text-sm">100% paid track record only</span>
+                  </label>
+                </div>
+
+                <hr className="border-border/60" />
+
                 {/* Platforms */}
                 <div className="flex flex-col gap-2.5">
                   <Label className="text-sm font-medium">Platform</Label>

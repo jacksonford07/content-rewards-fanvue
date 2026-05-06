@@ -10,6 +10,7 @@ import { and, desc, eq, gt, ilike, inArray, not, sql } from "drizzle-orm";
 import { DB, type Database } from "../db/db.module.js";
 import * as schema from "../db/schema.js";
 import { TrustService, type TrustScore } from "../trust/trust.service.js";
+import { PosthogService } from "../posthog/posthog.service.js";
 
 function generatePrivateSlug(): string {
   return randomBytes(9)
@@ -49,6 +50,7 @@ export class CampaignsService {
   constructor(
     @Inject(DB) private db: Database,
     private trust: TrustService,
+    private posthog: PosthogService,
   ) {}
 
   async sourceStatus(id: string): Promise<{ available: boolean }> {
@@ -82,6 +84,7 @@ export class CampaignsService {
     viewerId?: string;
     page?: number;
     limit?: number;
+    payoutType?: "per_1k_views" | "per_subscriber";
   }) {
     const page = Math.max(1, filters.page ?? 1);
     const limit = Math.min(100, Math.max(1, filters.limit ?? 12));
@@ -137,6 +140,10 @@ export class CampaignsService {
 
     if (filters.search) {
       conditions.push(ilike(schema.campaigns.title, `%${filters.search}%`));
+    }
+
+    if (filters.payoutType) {
+      conditions.push(eq(schema.campaigns.payoutType, filters.payoutType));
     }
 
     // M3.3 — default sort by creator trust descending. Tiebreakers:
@@ -457,6 +464,7 @@ export class CampaignsService {
       ratePerSub?: number;
       applicationMode?: "auto" | "manual";
       endsAt?: string;
+      trafficRules?: string;
     },
   ) {
     // v1.1: no escrow / wallet — campaigns publish directly to "active"
@@ -507,6 +515,7 @@ export class CampaignsService {
         payoutType: data.payoutType ?? "per_1k_views",
         ratePerSubCents: Math.round((data.ratePerSub ?? 0) * 100),
         applicationMode: data.applicationMode ?? "auto",
+        trafficRules: data.trafficRules ?? null,
         rewardRatePer1kCents: Math.round((data.rewardRatePer1k ?? 0) * 100),
         totalBudgetCents: Math.round((data.totalBudget ?? 0) * 100),
         minPayoutThreshold: Math.round(data.minPayoutThreshold ?? 0),
@@ -520,6 +529,28 @@ export class CampaignsService {
         endsAt,
       })
       .returning();
+
+    // v1.2 M4 — PRD §S5 events. Fired only when the campaign actually
+    // goes live (status === "active"); drafts don't count.
+    if (campaign && campaign.status === "active") {
+      this.posthog.capture("campaign_created", creatorId, {
+        campaign_id: campaign.id,
+        payout_type: campaign.payoutType,
+        total_budget_cents: campaign.totalBudgetCents,
+        is_private: campaign.isPrivate,
+      });
+      if (campaign.payoutType === "per_subscriber") {
+        this.posthog.capture(
+          "subscriber_campaign_created",
+          creatorId,
+          {
+            campaign_id: campaign.id,
+            rate_per_sub_cents: campaign.ratePerSubCents,
+            application_mode: campaign.applicationMode,
+          },
+        );
+      }
+    }
 
     return this.serializeSingle(campaign!);
   }
@@ -648,6 +679,7 @@ export class CampaignsService {
       applicationMode?: "auto" | "manual";
       endsAt?: string;
       acceptedPayoutMethods?: string[];
+      trafficRules?: string | null;
     },
   ) {
     const [existing] = await this.db
@@ -719,6 +751,12 @@ export class CampaignsService {
       }
       if (data.applicationMode !== undefined) {
         updateData.applicationMode = data.applicationMode;
+      }
+      if (data.trafficRules !== undefined) {
+        updateData.trafficRules =
+          data.trafficRules === null || data.trafficRules === ""
+            ? null
+            : data.trafficRules;
       }
       if (data.endsAt !== undefined) {
         if (data.endsAt === null || data.endsAt === "") {
@@ -1005,6 +1043,7 @@ export class CampaignsService {
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
+      trafficRules: c.trafficRules,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,
@@ -1042,6 +1081,7 @@ export class CampaignsService {
       acceptedPayoutMethods: c.acceptedPayoutMethods,
       payoutType: c.payoutType,
       applicationMode: c.applicationMode,
+      trafficRules: c.trafficRules,
       ratePerSub: c.ratePerSubCents / 100,
       rewardRatePer1k: c.rewardRatePer1kCents / 100,
       totalBudget: c.totalBudgetCents / 100,

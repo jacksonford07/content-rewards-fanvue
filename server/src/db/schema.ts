@@ -143,6 +143,10 @@ export const campaigns = pgTable("campaigns", {
   // on first AI verification for the campaign and re-used afterwards so we
   // hit Drive (or whichever host) at most once per source URL.
   sourceKeyframes: jsonb("source_keyframes").$type<SourceKeyframe[]>(),
+  // v1.2 M2 — per-campaign promoter rules (markdown). Surfaced in the
+  // promoter workspace next to the tracking link. Optional override of
+  // the creator-level default rules.
+  trafficRules: text("traffic_rules"),
 });
 
 // ─── Submissions ─────────────────────────────────────────────────────────────
@@ -176,6 +180,9 @@ export const submissions = pgTable("submissions", {
       "ready_to_pay",
       "paid_off_platform",
       "disputed",
+      // v1.2 M3 — creator revoked the tracking link (or Fanvue lost it).
+      // Accrual stops; prior accrued earnings stand.
+      "revoked",
     ],
   })
     .default("pending")
@@ -209,6 +216,10 @@ export const submissions = pgTable("submissions", {
   trackingLinkSlug: text("tracking_link_slug"),
   // Snapshot of acquired subscribers at the last attribution cron run.
   lastAcquiredSubs: integer("last_acquired_subs").default(0).notNull(),
+  // v1.2 M2 — snapshot of clicks at the last cron run. Used for delta
+  // computation only; clicks do not accrue earnings (per-sub rate is on
+  // acquired subscribers).
+  lastClicks: integer("last_clicks").default(0).notNull(),
 });
 
 // ─── Submission View Snapshots ───────────────────────────────────────────────

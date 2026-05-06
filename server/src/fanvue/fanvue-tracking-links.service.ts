@@ -41,6 +41,16 @@ export class FanvueAuthError extends Error {
   }
 }
 
+/** v1.2 M3.4 — Fanvue returned 404 for a tracking link we believed was
+ * minted. Surfaces creator-side deletion of a link from the Fanvue
+ * dashboard so the app can auto-revoke the linked submission. */
+export class FanvueNotFoundError extends Error {
+  constructor(public path: string) {
+    super(`Fanvue resource not found: ${path}`);
+    this.name = "FanvueNotFoundError";
+  }
+}
+
 export class FanvueScopeError extends Error {
   constructor(public requiredScope: string) {
     super(`Missing Fanvue scope: ${requiredScope}`);
@@ -146,6 +156,9 @@ export class FanvueTrackingLinksService {
 
     if (res.status === 401) {
       throw new FanvueAuthError();
+    }
+    if (res.status === 404) {
+      throw new FanvueNotFoundError(path);
     }
     if (res.status === 403) {
       // Fanvue uses 403 for both forbidden-resource and missing-scope. Treat
