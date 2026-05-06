@@ -621,7 +621,7 @@ export function CreateCampaignPage() {
             <div className="space-y-3">
               <p className="text-sm font-medium">
                 {state.payoutType === "per_subscriber"
-                  ? "Select platforms where promoters will share your tracking link"
+                  ? "Where promoters can share your tracking link — clip, post, story, or thread"
                   : "Select all platforms where clippers can post"}
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -809,40 +809,47 @@ export function CreateCampaignPage() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Min views before submittable</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    aria-invalid={showMinThresholdError || undefined}
-                    className={cn(
-                      "tabular-nums",
-                      showMinThresholdError && "border-destructive focus-visible:ring-destructive/40"
-                    )}
-                    value={state.minThreshold}
-                    onChange={(e) => update("minThreshold", e.target.value.replace(/[^0-9]/g, "").replace(/^0+(\d)/, "$1"))}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Clippers can't submit clips with fewer views
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Max payout per clip (optional)</Label>
-                  <div className="relative">
-                    <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      className="pl-9 tabular-nums"
-                      placeholder="Unlimited"
-                      value={state.maxPerClip}
-                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("maxPerClip", v) }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Cap spend on a single viral clip
-                  </p>
-                </div>
+                {/* M1.4 — per-view-only fields. Per-sub has no per-clip cap
+                    (CC2 settled: campaign budget is the only cap) and no
+                    minimum-views gate (no clip artefact to scrape). */}
+                {state.payoutType === "per_1k_views" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Min views before submittable</Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        aria-invalid={showMinThresholdError || undefined}
+                        className={cn(
+                          "tabular-nums",
+                          showMinThresholdError && "border-destructive focus-visible:ring-destructive/40"
+                        )}
+                        value={state.minThreshold}
+                        onChange={(e) => update("minThreshold", e.target.value.replace(/[^0-9]/g, "").replace(/^0+(\d)/, "$1"))}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Clippers can't submit clips with fewer views
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Max payout per clip (optional)</Label>
+                      <div className="relative">
+                        <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          className="pl-9 tabular-nums"
+                          placeholder="Unlimited"
+                          value={state.maxPerClip}
+                          onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("maxPerClip", v) }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Cap spend on a single viral clip
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
 
               <Alert className="border-primary/30 bg-primary/5">
