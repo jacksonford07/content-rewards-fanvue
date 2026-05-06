@@ -45,6 +45,8 @@ type CampaignTypeFilter = "all" | "per_1k_views" | "per_subscriber";
 const platformOptions: { value: Platform; label: string }[] = [
   { value: "tiktok", label: "TikTok" },
   { value: "instagram", label: "Instagram Reels" },
+  { value: "reddit", label: "Reddit" },
+  { value: "x", label: "X" },
 ];
 
 export function HubPage() {
