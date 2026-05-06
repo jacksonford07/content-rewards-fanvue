@@ -5,6 +5,7 @@ import {
   ChartLineUp,
   Clock,
   CheckCircle,
+  Copy,
   XCircle,
   CurrencyDollar,
   Eye,
@@ -402,8 +403,12 @@ function SubmissionRow({ submission }: { submission: Submission }) {
           {/* M4.4 — tracking link surface for per-subscriber submissions.
               Bug E: also show a placeholder when per-sub is approved but the
               link hasn't minted yet (auto-approve race or scope-upgrade
-              pending). */}
-          {submission.trackingLinkUrl ? (
+              pending).
+              Bug K: hide the link entirely once the creator has revoked
+              or rejected (banned) the submission — the link is gone on
+              Fanvue's side too, surfacing it here is misleading. */}
+          {submission.status === "revoked" ||
+          submission.status === "rejected" ? null : submission.trackingLinkUrl ? (
             <TrackingLinkRow
               url={submission.trackingLinkUrl}
               slug={submission.trackingLinkSlug ?? ""}
@@ -520,7 +525,7 @@ function SubmissionRow({ submission }: { submission: Submission }) {
   )
 }
 
-function TrackingLinkRow({ url, slug }: { url: string; slug: string }) {
+function TrackingLinkRow({ url }: { url: string; slug: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
@@ -534,11 +539,18 @@ function TrackingLinkRow({ url, slug }: { url: string; slug: string }) {
   }
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-      <span className="text-xs font-medium text-foreground">
+      <span className="text-xs font-medium text-foreground shrink-0">
         Your Fanvue tracking link
       </span>
-      <code className="font-mono text-[11px] text-muted-foreground">{slug}</code>
-      <span className="ml-auto flex gap-2">
+      {/* Bug J: show the full resolved URL, not just the slug. Truncate
+          visually but keep the value full-width so copy paste is correct. */}
+      <code
+        className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+        title={url}
+      >
+        {url}
+      </code>
+      <span className="ml-auto flex gap-2 shrink-0">
         <Button size="sm" variant="outline" asChild>
           <a href={url} target="_blank" rel="noopener noreferrer">
             <ArrowSquareOut className="size-3.5" />
@@ -549,7 +561,7 @@ function TrackingLinkRow({ url, slug }: { url: string; slug: string }) {
           {copied ? (
             <CheckCircle weight="fill" className="size-3.5" />
           ) : (
-            <CurrencyDollar weight="fill" className="size-3.5" />
+            <Copy weight="fill" className="size-3.5" />
           )}
           {copied ? "Copied" : "Copy"}
         </Button>

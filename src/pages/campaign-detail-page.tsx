@@ -859,14 +859,18 @@ export function CampaignDetailPage() {
               </p>
               <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-4xl font-bold tracking-tight text-foreground tabular-nums">
-                  {formatCurrency(campaign.rewardRatePer1k)}
+                  {formatCurrency(
+                    isPerSub ? campaign.ratePerSub : campaign.rewardRatePer1k,
+                  )}
                 </span>
                 <span className="text-sm text-muted-foreground">
-                  / 1,000 views
+                  {isPerSub ? "/ subscriber" : "/ 1,000 views"}
                 </span>
               </div>
 
-              {campaign.maxPayoutPerClip && (
+              {/* Bug F: max-per-clip is per-view-only (CC2 — no per-promoter
+                  cap on per-sub). */}
+              {!isPerSub && campaign.maxPayoutPerClip && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Max{" "}
                   <span className="text-foreground font-medium">
