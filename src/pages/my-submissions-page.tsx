@@ -223,7 +223,15 @@ export function MySubmissionsPage() {
   )
 }
 
-function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?: boolean }) {
+function StatusBadge({
+  status,
+  isBanned,
+  isPerSub,
+}: {
+  status: SubmissionStatus
+  isBanned?: boolean
+  isPerSub?: boolean
+}) {
   if (isBanned) {
     return (
       <Badge
@@ -245,12 +253,14 @@ function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?
       icon: <Clock className="size-3" weight="fill" />,
     },
     approved: {
-      label: "Approved · verifying",
+      // Bug E: per-sub stays in "accruing" state forever (no view-scrape
+      // window) — verifying language doesn't fit the per-sub flow.
+      label: isPerSub ? "Approved · accruing" : "Approved · verifying",
       className: "border-success/40 bg-success/10 text-success",
       icon: <CheckCircle className="size-3" weight="fill" />,
     },
     auto_approved: {
-      label: "Auto-approved",
+      label: isPerSub ? "Approved · accruing" : "Auto-approved",
       className: "border-success/40 bg-success/10 text-success",
       icon: <CheckCircle className="size-3" weight="fill" />,
     },
@@ -296,6 +306,9 @@ function StatusBadge({ status, isBanned }: { status: SubmissionStatus; isBanned?
 
 function SubmissionRow({ submission }: { submission: Submission }) {
   const [trendOpen, setTrendOpen] = useState(false)
+  // Bug E: per-sub submissions are detected by absence of postUrl
+  // (per-view requires it; per-sub apply has no clip artefact).
+  const isPerSub = submission.postUrl == null
   const isTracking =
     submission.status === "approved" ||
     submission.status === "auto_approved" ||
@@ -343,7 +356,11 @@ function SubmissionRow({ submission }: { submission: Submission }) {
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <StatusBadge status={submission.status} isBanned={submission.isBanned} />
+            <StatusBadge
+              status={submission.status}
+              isBanned={submission.isBanned}
+              isPerSub={isPerSub}
+            />
             {submission.status === "pending" && submission.autoApproveAt && (
               <Badge
                 variant="outline"
@@ -382,13 +399,26 @@ function SubmissionRow({ submission }: { submission: Submission }) {
             </div>
           )}
 
-          {/* M4.4 — tracking link surface for per-subscriber submissions */}
-          {submission.trackingLinkUrl && (
+          {/* M4.4 — tracking link surface for per-subscriber submissions.
+              Bug E: also show a placeholder when per-sub is approved but the
+              link hasn't minted yet (auto-approve race or scope-upgrade
+              pending). */}
+          {submission.trackingLinkUrl ? (
             <TrackingLinkRow
               url={submission.trackingLinkUrl}
               slug={submission.trackingLinkSlug ?? ""}
             />
-          )}
+          ) : isPerSub &&
+            (submission.status === "approved" ||
+              submission.status === "auto_approved") ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+              <Clock className="size-3.5" weight="fill" />
+              <span>
+                Awaiting tracking link. The creator may need to grant
+                Fanvue tracking-link permission — check back in a few minutes.
+              </span>
+            </div>
+          ) : null}
 
           {/* M3.5 — clipper confirmation prompt */}
           {submission.payoutEvent &&
@@ -461,16 +491,22 @@ function SubmissionRow({ submission }: { submission: Submission }) {
               Trend
             </Button>
           )}
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href={submission.postUrl ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View post
-              <ArrowSquareOut className="size-3.5" />
-            </a>
-          </Button>
+          {/* Bug E: per-sub submissions have no clip artefact, so the
+              "View post" button is meaningless and the href would be a
+              dead link. The tracking link is the relevant artifact and
+              already renders via TrackingLinkRow above. */}
+              {!isPerSub && submission.postUrl && (
+                <Button variant="outline" size="sm" asChild>
+                  <a
+                    href={submission.postUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View post
+                    <ArrowSquareOut className="size-3.5" />
+                  </a>
+                </Button>
+              )}
         </div>
       </CardContent>
       {canShowTrend && (
