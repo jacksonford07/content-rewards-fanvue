@@ -63,6 +63,14 @@ export const users = pgTable("users", {
   // M4: persisted Fanvue OAuth state for tracking-link calls.
   fanvueAccessToken: text("fanvue_access_token"),
   fanvueScopes: text("fanvue_scopes").array().default([]).notNull(),
+  // v1.2 M2.5 — creator-self-reported Fanvue page subscription price.
+  // Fanvue's API does not expose this, so creators report it themselves
+  // in settings and Content Rewards uses it as guidance on per-sub
+  // campaign creation + clipper-facing context. Convention:
+  //   null  → not set (UI prompts)
+  //   0     → free page
+  //   >0    → paid page, monthly cost in cents (USD)
+  fanvuePageSubPriceCents: integer("fanvue_page_sub_price_cents"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -147,6 +155,10 @@ export const campaigns = pgTable("campaigns", {
   // promoter workspace next to the tracking link. Optional override of
   // the creator-level default rules.
   trafficRules: text("traffic_rules"),
+  // v1.2 M2.5 — snapshot of users.fanvuePageSubPriceCents at the time
+  // this campaign was created. Lets the campaign card show the creator's
+  // page price even if they later edit it. Same null/0/>0 convention.
+  creatorSubPriceAtCreationCents: integer("creator_sub_price_at_creation_cents"),
 });
 
 // ─── Submissions ─────────────────────────────────────────────────────────────

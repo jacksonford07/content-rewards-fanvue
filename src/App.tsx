@@ -21,6 +21,7 @@ import { CreatorAnalyticsPage } from "@/pages/creator-analytics-page"
 import { NotificationsPage } from "@/pages/notifications-page"
 import { CampaignBudgetPage } from "@/pages/campaign-budget-page"
 import { PayoutSettingsPage } from "@/pages/payout-settings-page"
+import { ProfileSettingsPage } from "@/pages/profile-settings-page"
 import { AdminDisputesPage } from "@/pages/admin-disputes-page"
 
 import { RoleSelectPage } from "@/pages/role-select-page"
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="c/:slug" element={<CampaignBySlugPage />} />
               <Route path="submissions" element={<MySubmissionsPage />} />
               <Route path="settings/payout" element={<PayoutSettingsPage />} />
+              <Route path="settings/profile" element={<ProfileSettingsPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route
                 path="creator/campaigns"

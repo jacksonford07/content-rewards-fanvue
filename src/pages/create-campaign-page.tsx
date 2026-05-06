@@ -815,6 +815,75 @@ export function CreateCampaignPage() {
                         onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("ratePerSub", v) }}
                       />
                     </div>
+                    {/* v1.2 M2.5 — surface the creator's self-reported page
+                        price as cost-vs-LTV context. Nudge to set it if
+                        unset. Snapshotted on campaign create so the value
+                        survives later edits to the user profile. */}
+                    {(() => {
+                      const cents = user?.fanvuePageSubPriceCents
+                      if (cents == null) {
+                        return (
+                          <Link
+                            to="/settings/profile"
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-primary underline-offset-4 hover:underline"
+                          >
+                            <Sparkle weight="fill" className="size-3" />
+                            Set your Fanvue page price for cost-vs-LTV
+                            context →
+                          </Link>
+                        )
+                      }
+                      if (cents === 0) {
+                        return (
+                          <p className="text-[11px] text-muted-foreground">
+                            Your page: <strong className="text-foreground">Free</strong>
+                            . You're paying for traffic, not direct revenue —
+                            make sure your post-subscription monetisation
+                            justifies the rate.{" "}
+                            <Link
+                              to="/settings/profile"
+                              className="text-primary underline-offset-4 hover:underline"
+                            >
+                              Edit
+                            </Link>
+                          </p>
+                        )
+                      }
+                      const price = cents / 100
+                      const rateNum = parseFloat(state.ratePerSub) || 0
+                      const monthsToBreakeven =
+                        rateNum > 0 ? rateNum / price : 0
+                      return (
+                        <p className="text-[11px] text-muted-foreground">
+                          Your page:{" "}
+                          <strong className="text-foreground">
+                            {formatCurrency(price)}/mo
+                          </strong>
+                          {rateNum > 0 && (
+                            <>
+                              {" "}— at {formatCurrency(rateNum)} per acquired
+                              sub, you break even after ~
+                              <strong className="text-foreground">
+                                {monthsToBreakeven < 1
+                                  ? `${monthsToBreakeven.toFixed(1)} month`
+                                  : `${Math.round(monthsToBreakeven)} month${
+                                      Math.round(monthsToBreakeven) === 1
+                                        ? ""
+                                        : "s"
+                                    }`}
+                              </strong>
+                              .
+                            </>
+                          )}{" "}
+                          <Link
+                            to="/settings/profile"
+                            className="text-primary underline-offset-4 hover:underline"
+                          >
+                            Edit
+                          </Link>
+                        </p>
+                      )
+                    })()}
                   </div>
                 )}
                 <div className="space-y-2">

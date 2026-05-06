@@ -59,7 +59,14 @@ export function RoleSelectPage() {
         navigate(savedRedirect, { replace: true })
         return
       }
-      navigate(pendingRole === "clipper" ? "/" : "/creator/campaigns")
+      // v1.2 M2.5 — first-time creators land on the page-price prompt so
+      // they can self-report their Fanvue subscription price up front.
+      // Skippable; available later at /settings/profile.
+      navigate(
+        pendingRole === "clipper"
+          ? "/"
+          : "/settings/profile?onboarding=1",
+      )
     } catch {
       toast.error("Couldn't save your choice. Please try again.")
       setIsSubmitting(false)

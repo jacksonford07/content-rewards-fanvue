@@ -17,6 +17,9 @@ export class UsersController {
       displayName?: string;
       avatarUrl?: string;
       role?: "clipper" | "creator";
+      // v1.2 M2.5 — creator-reported Fanvue page subscription price (cents).
+      // null clears it; 0 = free page; >0 = paid page monthly cost.
+      fanvuePageSubPriceCents?: number | null;
     },
   ) {
     return this.usersService.updateMe(req.user.id, body);

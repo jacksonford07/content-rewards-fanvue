@@ -13,6 +13,9 @@ export interface AuthUser {
 
   isAdmin?: boolean
   fanvueScopes?: string[]
+  // v1.2 M2.5 — creator-self-reported Fanvue page subscription price.
+  // null = not set; 0 = free page; >0 = monthly price in cents.
+  fanvuePageSubPriceCents?: number | null
 
   createdAt: string
 }
