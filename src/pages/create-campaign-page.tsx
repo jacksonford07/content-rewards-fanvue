@@ -674,41 +674,37 @@ export function CreateCampaignPage() {
 
           {!loadingExisting && step === 5 && (
             <div className="space-y-5">
-              {/* M4.1 — payout type toggle */}
-              <div className="space-y-2">
-                <Label>Payout type</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      { v: "per_1k_views", label: "Per 1k views" },
-                      { v: "per_subscriber", label: "Per subscriber" },
-                    ] as const
-                  ).map((opt) => {
-                    const selected = state.payoutType === opt.v
-                    return (
-                      <button
-                        key={opt.v}
-                        type="button"
-                        onClick={() => update("payoutType", opt.v)}
-                        className={cn(
-                          "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
-                          selected
-                            ? "border-primary/60 bg-primary/10 text-primary"
-                            : "border-border/70 bg-background/50 hover:border-border",
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    )
-                  })}
+              {/* Bug H: payout type is set in the entry modal (M1.2);
+                  duplicating the toggle here surfaces the wrong-mode label
+                  on the active campaign. Show a read-only summary with a
+                  "Change" link that re-opens the modal. */}
+              <div className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center gap-2 text-sm">
+                  {state.payoutType === "per_subscriber" ? (
+                    <UserPlus weight="fill" className="size-4 text-primary" />
+                  ) : (
+                    <Scissors weight="fill" className="size-4 text-primary" />
+                  )}
+                  <span className="font-medium">
+                    {state.payoutType === "per_subscriber"
+                      ? "Subscriber Campaign"
+                      : "Clip Campaign"}
+                  </span>
+                  {state.payoutType === "per_subscriber" && (
+                    <span className="text-[11px] text-muted-foreground">
+                      · requires tracking-link permission
+                    </span>
+                  )}
                 </div>
-                {state.payoutType === "per_subscriber" && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Per-subscriber requires Fanvue tracking-link permission.
-                    If you haven't granted it yet you'll be prompted to
-                    re-authenticate before publish.
-                  </p>
-                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setModeModalOpen(true)}
+                >
+                  Change
+                </Button>
               </div>
 
               {/* M4.2 — application mode + required end date for per-sub */}

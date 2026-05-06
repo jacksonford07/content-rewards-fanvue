@@ -73,7 +73,11 @@ export function PerSubClipperPanel({
       <div className="mt-6 space-y-3">
         <ApplicationStatusBadge status={application.status} />
 
-        {application.trackingLinkUrl ? (
+        {/* Bug K: hide the tracking link for revoked / rejected submissions
+            — the link is gone on Fanvue's side, showing it here is
+            misleading. */}
+        {(application.status === "revoked" ||
+          application.status === "rejected") ? null : application.trackingLinkUrl ? (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <LinkSimple className="size-4" weight="bold" />
