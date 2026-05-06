@@ -695,15 +695,19 @@ export function CampaignDetailPage() {
                     ))}
                   </div>
                 </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Minimum views to submit
-                  </p>
-                  <p className="mt-2 text-sm font-medium">
-                    {formatCompactNumber(campaign.minPayoutThreshold)} views on
-                    your clip
-                  </p>
-                </div>
+                {/* Bug L: minimum views is per-view-only — there's no clip
+                    artefact to count views on for a per-sub campaign. */}
+                {!isPerSub && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Minimum views to submit
+                    </p>
+                    <p className="mt-2 text-sm font-medium">
+                      {formatCompactNumber(campaign.minPayoutThreshold)} views
+                      on your clip
+                    </p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

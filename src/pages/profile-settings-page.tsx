@@ -134,11 +134,9 @@ export function ProfileSettingsPage() {
             <div className="flex items-start gap-2">
               <Info className="size-4 shrink-0 text-muted-foreground" />
               <span>
-                Fanvue's API doesn't expose this — you type it in. We use it
-                on per-subscriber campaign creation so you can reason about
-                cost vs lifetime value, and we show it to clippers so they
-                know how hard the subs will be to acquire (free pages convert
-                differently to paid pages).
+                Showing this on your subscriber campaigns helps clippers gauge
+                how hard the subs will be to acquire — being upfront tends to
+                attract better clippers.
               </span>
             </div>
           </div>

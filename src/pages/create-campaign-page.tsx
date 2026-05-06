@@ -850,31 +850,12 @@ export function CreateCampaignPage() {
                         )
                       }
                       const price = cents / 100
-                      const rateNum = parseFloat(state.ratePerSub) || 0
-                      const monthsToBreakeven =
-                        rateNum > 0 ? rateNum / price : 0
                       return (
                         <p className="text-[11px] text-muted-foreground">
                           Your page:{" "}
                           <strong className="text-foreground">
                             {formatCurrency(price)}/mo
-                          </strong>
-                          {rateNum > 0 && (
-                            <>
-                              {" "}— at {formatCurrency(rateNum)} per acquired
-                              sub, you break even after ~
-                              <strong className="text-foreground">
-                                {monthsToBreakeven < 1
-                                  ? `${monthsToBreakeven.toFixed(1)} month`
-                                  : `${Math.round(monthsToBreakeven)} month${
-                                      Math.round(monthsToBreakeven) === 1
-                                        ? ""
-                                        : "s"
-                                    }`}
-                              </strong>
-                              .
-                            </>
-                          )}{" "}
+                          </strong>{" "}
                           <Link
                             to="/settings/profile"
                             className="text-primary underline-offset-4 hover:underline"
