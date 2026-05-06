@@ -16,6 +16,8 @@ import {
   FloppyDisk,
   Lock,
   Copy,
+  Scissors,
+  UserPlus,
 } from "@phosphor-icons/react"
 import { toast } from "sonner"
 
@@ -116,6 +118,9 @@ export function CreateCampaignPage() {
 
   const [step, setStep] = useState(1)
   const [maxStep, setMaxStep] = useState(1)
+  // M1.2: pop a mode-selection modal once per draft on entry. Editing an
+  // existing draft skips the modal because payoutType is already set.
+  const [modeModalOpen, setModeModalOpen] = useState(false)
   const stepRefs = useRef<(HTMLLIElement | null)[]>([])
   const [state, setState] = useState(() => ({
     title: "",
@@ -142,6 +147,8 @@ export function CreateCampaignPage() {
   useEffect(() => {
     if (!id) {
       setInitialSnapshot(JSON.stringify(state))
+      // New drafts get the mode picker modal up-front.
+      setModeModalOpen(true)
       return
     }
     setLoadingExisting(true)
@@ -613,10 +620,15 @@ export function CreateCampaignPage() {
           {!loadingExisting && step === 4 && (
             <div className="space-y-3">
               <p className="text-sm font-medium">
-                Select all platforms where clippers can post
+                {state.payoutType === "per_subscriber"
+                  ? "Where promoters can share your tracking link — clip, post, story, or thread"
+                  : "Select all platforms where clippers can post"}
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
-                {(["tiktok", "instagram"] as Platform[]).map((p) => {
+                {(state.payoutType === "per_subscriber"
+                  ? (["instagram", "tiktok", "reddit", "x"] as Platform[])
+                  : (["tiktok", "instagram"] as Platform[])
+                ).map((p) => {
                   const selected = state.platforms.includes(p)
                   return (
                     <button
@@ -797,67 +809,97 @@ export function CreateCampaignPage() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Min views before submittable</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    aria-invalid={showMinThresholdError || undefined}
-                    className={cn(
-                      "tabular-nums",
-                      showMinThresholdError && "border-destructive focus-visible:ring-destructive/40"
-                    )}
-                    value={state.minThreshold}
-                    onChange={(e) => update("minThreshold", e.target.value.replace(/[^0-9]/g, "").replace(/^0+(\d)/, "$1"))}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Clippers can't submit clips with fewer views
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Max payout per clip (optional)</Label>
-                  <div className="relative">
-                    <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      className="pl-9 tabular-nums"
-                      placeholder="Unlimited"
-                      value={state.maxPerClip}
-                      onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("maxPerClip", v) }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Cap spend on a single viral clip
-                  </p>
-                </div>
+                {/* M1.4 — per-view-only fields. Per-sub has no per-clip cap
+                    (CC2 settled: campaign budget is the only cap) and no
+                    minimum-views gate (no clip artefact to scrape). */}
+                {state.payoutType === "per_1k_views" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Min views before submittable</Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        aria-invalid={showMinThresholdError || undefined}
+                        className={cn(
+                          "tabular-nums",
+                          showMinThresholdError && "border-destructive focus-visible:ring-destructive/40"
+                        )}
+                        value={state.minThreshold}
+                        onChange={(e) => update("minThreshold", e.target.value.replace(/[^0-9]/g, "").replace(/^0+(\d)/, "$1"))}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Clippers can't submit clips with fewer views
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Max payout per clip (optional)</Label>
+                      <div className="relative">
+                        <CurrencyDollar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          className="pl-9 tabular-nums"
+                          placeholder="Unlimited"
+                          value={state.maxPerClip}
+                          onChange={(e) => { let v = e.target.value.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1"); if ((v.match(/\./g) || []).length <= 1) update("maxPerClip", v) }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Cap spend on a single viral clip
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
 
               <Alert className="border-primary/30 bg-primary/5">
                 <Sparkle className="size-4 text-primary" weight="fill" />
                 <AlertTitle>Spend preview</AlertTitle>
                 <AlertDescription className="space-y-1">
-                  <span className="block">
-                    At{" "}
-                    <strong className="text-foreground">
-                      {formatCurrency(rateNum)} per 1K views
-                    </strong>
-                    , {formatCurrency(budgetNum)} covers approximately{" "}
-                    <strong className="text-foreground">
-                      {Math.floor((budgetNum / rateNum) * 1000).toLocaleString()}{" "}
-                      verified views
-                    </strong>
-                    .
-                  </span>
-                  {state.maxPerClip && (
-                    <span className="block">
-                      With a {formatCurrency(parseFloat(state.maxPerClip))}/clip
-                      cap, you could pay out up to{" "}
-                      <strong className="text-foreground">
-                        {clipsAffordable} max-cap clips
-                      </strong>
-                      .
-                    </span>
+                  {state.payoutType === "per_subscriber" ? (
+                    (() => {
+                      const subRate = parseFloat(state.ratePerSub || "0")
+                      const subsCovered =
+                        subRate > 0 ? Math.floor(budgetNum / subRate) : 0
+                      return (
+                        <span className="block">
+                          At{" "}
+                          <strong className="text-foreground">
+                            {formatCurrency(subRate)} per subscriber
+                          </strong>
+                          , {formatCurrency(budgetNum)} covers approximately{" "}
+                          <strong className="text-foreground">
+                            {subsCovered.toLocaleString()} acquired subscribers
+                          </strong>
+                          .
+                        </span>
+                      )
+                    })()
+                  ) : (
+                    <>
+                      <span className="block">
+                        At{" "}
+                        <strong className="text-foreground">
+                          {formatCurrency(rateNum)} per 1K views
+                        </strong>
+                        , {formatCurrency(budgetNum)} covers approximately{" "}
+                        <strong className="text-foreground">
+                          {Math.floor((budgetNum / rateNum) * 1000).toLocaleString()}{" "}
+                          verified views
+                        </strong>
+                        .
+                      </span>
+                      {state.maxPerClip && (
+                        <span className="block">
+                          With a {formatCurrency(parseFloat(state.maxPerClip))}/clip
+                          cap, you could pay out up to{" "}
+                          <strong className="text-foreground">
+                            {clipsAffordable} max-cap clips
+                          </strong>
+                          .
+                        </span>
+                      )}
+                    </>
                   )}
                 </AlertDescription>
               </Alert>
@@ -1062,6 +1104,83 @@ export function CreateCampaignPage() {
             >
               Done
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* M1.2 — mode picker modal: fires once on entry to a new draft so
+           creators choose Clip vs Subscriber before composing platforms,
+           rate, etc. Editing existing drafts skips because payoutType is
+           already set. */}
+      <Dialog
+        open={modeModalOpen}
+        onOpenChange={(o) => setModeModalOpen(o)}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>What kind of campaign?</DialogTitle>
+            <DialogDescription>
+              Pick a payout model. You can change it later in step 5, but it
+              shapes the platforms and inputs the rest of the flow shows.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                {
+                  v: "per_1k_views",
+                  icon: Scissors,
+                  title: "Clip Campaign",
+                  hint: "Pay per 1,000 verified views. Best for bulk reach: clippers post short-form on TikTok / Instagram Reels.",
+                },
+                {
+                  v: "per_subscriber",
+                  icon: UserPlus,
+                  title: "Subscriber Campaign",
+                  hint: "Pay per acquired Fanvue subscriber via tracking link. Best for direct revenue: promoters share your page on IG, TikTok, Reddit, X.",
+                },
+              ] as const
+            ).map((opt) => {
+              const Icon = opt.icon
+              const selected = state.payoutType === opt.v
+              return (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => {
+                    update("payoutType", opt.v)
+                    // Reset platforms when switching mode — selectable
+                    // platforms differ between clip and per-sub.
+                    if (state.payoutType !== opt.v) {
+                      update("platforms", [])
+                    }
+                  }}
+                  className={cn(
+                    "flex flex-col items-start gap-2.5 rounded-xl border p-4 text-left transition-colors",
+                    selected
+                      ? "border-primary/60 bg-primary/10"
+                      : "border-border/70 bg-background/50 hover:border-border",
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      "size-6",
+                      selected ? "text-primary" : "text-muted-foreground",
+                    )}
+                    weight={selected ? "fill" : "regular"}
+                  />
+                  <div>
+                    <div className="text-sm font-semibold">{opt.title}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {opt.hint}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setModeModalOpen(false)}>Continue</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

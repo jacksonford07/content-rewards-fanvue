@@ -5,6 +5,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { TrustBadge } from "@/components/trust-badge"
 import { PlatformIcon } from "@/components/platform-icon"
+import { CampaignTypeBadge } from "@/components/campaign-type-badge"
 import type { Campaign } from "@/lib/types"
 import { formatCompactNumber, formatCurrency } from "@/lib/mock-data"
 
@@ -27,6 +28,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
       )
     : 0
   const committedPct = spentPct + reservedPct
+  const isPerSub = campaign.payoutType === "per_subscriber"
 
   return (
     <Link to={`/campaigns/${campaign.id}`} className="group block h-full">
@@ -40,10 +42,15 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
             referrerPolicy="no-referrer"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+          <div className="absolute left-3 top-3">
+            <CampaignTypeBadge payoutType={campaign.payoutType} />
+          </div>
           <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-background/90 px-2.5 py-1 text-xs font-semibold backdrop-blur-md">
             <CurrencyDollar className="size-3 text-primary" weight="bold" />
             <span className="tabular-nums">
-              {formatCurrency(campaign.rewardRatePer1k)} / 1K
+              {isPerSub
+                ? `${formatCurrency(campaign.ratePerSub)} / sub`
+                : `${formatCurrency(campaign.rewardRatePer1k)} / 1K`}
             </span>
           </div>
           <div className="absolute bottom-3 right-3 flex items-center gap-1">
@@ -89,10 +96,12 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
                 <Users className="size-3" />
                 {campaign.activeClippers}
               </span>
-              <span className="flex items-center gap-1">
-                <Eye className="size-3" />
-                {formatCompactNumber(campaign.totalViews)}
-              </span>
+              {!isPerSub && (
+                <span className="flex items-center gap-1">
+                  <Eye className="size-3" />
+                  {formatCompactNumber(campaign.totalViews)}
+                </span>
+              )}
             </div>
             <span className="text-foreground font-medium tabular-nums">
               {formatCurrency(available)} left

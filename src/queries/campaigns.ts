@@ -17,6 +17,7 @@ export interface ListCampaignsParams {
   sort?: string
   page: number
   limit: number
+  payoutType?: "per_1k_views" | "per_subscriber"
 }
 
 export function useCampaigns(
@@ -32,6 +33,7 @@ export function useCampaigns(
       if (params.minRate && params.minRate !== "any") qs.set("min_rate", params.minRate)
       if (params.sort) qs.set("sort", params.sort)
       if (params.hasBudget) qs.set("has_budget", "true")
+      if (params.payoutType) qs.set("payout_type", params.payoutType)
       qs.set("page", String(params.page))
       qs.set("limit", String(params.limit))
       const res = await api.get<PaginatedResponse<Campaign>>(
